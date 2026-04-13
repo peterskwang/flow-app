@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "FLOW",
+    "slug": "flow-app",
+    "version": "1.0.0",
+    "scheme": "flow",
+    "orientation": "portrait",
+    "owner": "peterskwang",
+    "platforms": ["ios", "android", "web"],
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "android": {
+      "package": "com.apex.flow"
+    },
+    "ios": {
+      "bundleIdentifier": "com.apex.flow"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "extra": {
+      "router": {
+        "origin": "auto"
+      }
+    }
+  }
+}
