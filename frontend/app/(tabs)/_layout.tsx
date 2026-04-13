@@ -64,6 +64,13 @@ const TabsLayout = () => {
           tabBarIcon: ({ color, size }) => <Ionicons name="alert-circle" color={color} size={size} />
         }}
       />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline" color={color} size={size} />
+        }}
+      />
     </Tabs>
   );
 };
