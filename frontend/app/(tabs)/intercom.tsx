@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
-import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 
 import wsClient from '../services/ws';
 
@@ -82,7 +82,8 @@ const IntercomScreen = () => {
   const enqueuePlayback = useCallback((base64Data: string) => {
     if (!base64Data) return;
     playbackQueue.current = playbackQueue.current.then(async () => {
-      const tempFile = `${FileSystem.cacheDirectory}ptt-${Date.now()}-${Math.random().toString(36).slice(2)}.aac`;
+      const cacheDir = FileSystem.cacheDirectory ?? '';
+      const tempFile = `${cacheDir}ptt-${Date.now()}-${Math.random().toString(36).slice(2)}.aac`;
       try {
         await FileSystem.writeAsStringAsync(tempFile, base64Data, {
           encoding: FileSystem.EncodingType.Base64
@@ -92,7 +93,7 @@ const IntercomScreen = () => {
           sound.setOnPlaybackStatusUpdate((status) => {
             if (!status.isLoaded) return;
             if (status.didJustFinish || !status.isPlaying) {
-              sound.setOnPlaybackStatusUpdate(undefined);
+              sound.setOnPlaybackStatusUpdate(null);
               resolve();
             }
           });
@@ -142,7 +143,7 @@ const IntercomScreen = () => {
             isTalking: true
           }
         }));
-        setActiveSpeaker({ id: senderId, name: name || 'Teammate' });
+        setActiveSpeaker({ id: senderId, name: name || 'Teammate', isTalking: true });
         break;
       case 'ptt_end':
         if (!senderId) return;
@@ -214,8 +215,8 @@ const IntercomScreen = () => {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
-        interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
-        interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
         shouldDuckAndroid: true,
         playThroughEarpieceAndroid: false,
         staysActiveInBackground: false
@@ -237,7 +238,7 @@ const IntercomScreen = () => {
             isTalking: true
           }
         }));
-        setActiveSpeaker({ id: userId, name: displayName || 'You' });
+        setActiveSpeaker({ id: userId, name: displayName || 'You', isTalking: true });
       }
     } catch (error) {
       console.error('Failed to start recording', error);

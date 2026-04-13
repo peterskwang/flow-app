@@ -209,7 +209,8 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   leaveButtonPressed: { opacity: 0.85 },
-  leaveButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 }
+  leaveButtonText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  versionText: { color: '#7f8ea3', fontSize: 14 }
 });
 
 export default SettingsScreen;
