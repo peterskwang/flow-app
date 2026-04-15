@@ -2,10 +2,16 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "types": ["expo", "expo-router"],
+    "types": [
+      "expo",
+      "expo-router"
+    ],
     "noImplicitAny": true,
     "resolveJsonModule": true,
     "allowJs": false
   },
-  "include": ["app", "app.d.ts", "expo-env.d.ts"]
+  "include": [
+    "app",
+    "app.d.ts"
+  ]
 }

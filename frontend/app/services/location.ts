@@ -40,12 +40,10 @@ export const startLocationTracking = async (onUpdate?: (coords: Coordinates) => 
 
       if (wsClient.isConnected()) {
         wsClient.send({
-          type: 'location_update',
-          payload: {
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-            timestamp: Date.now()
-          }
+          type: 'location',
+          lat: coords.latitude,
+          lng: coords.longitude,
+          ts: Date.now()
         });
       }
     }

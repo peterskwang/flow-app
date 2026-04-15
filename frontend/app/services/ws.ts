@@ -8,6 +8,7 @@ const WS_URL = API_URL.replace('http', 'ws');
 class FlowWebSocket {
   private socket: WebSocket | null = null;
   private listeners: ListenerMap = {};
+  private identity = { userId: '', groupId: '', name: '' };
 
   connect(userId: string, groupId: string, name: string) {
     if (!userId || !groupId) return;
@@ -16,11 +17,14 @@ class FlowWebSocket {
       this.socket.close();
     }
 
+    this.identity = { userId, groupId, name };
+
     const url = `${WS_URL}/ws?userId=${userId}&groupId=${groupId}&name=${encodeURIComponent(name || '')}`;
     this.socket = new WebSocket(url);
 
     this.socket.onopen = () => {
       this.emit('status', { state: 'connected' });
+      this.send({ type: 'join' });
     };
 
     this.socket.onmessage = (event) => {
@@ -43,9 +47,29 @@ class FlowWebSocket {
   }
 
   send(payload: Record<string, any>) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(payload));
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
+
+    const envelope: Record<string, any> = { ...payload };
+    if (typeof envelope.payload === 'object' && envelope.payload !== null) {
+      Object.entries(envelope.payload).forEach(([key, value]) => {
+        if (envelope[key] === undefined) {
+          envelope[key] = value;
+        }
+      });
+      delete envelope.payload;
     }
+
+    if (this.identity.userId && envelope.userId == null) {
+      envelope.userId = this.identity.userId;
+    }
+    if (this.identity.groupId && envelope.groupId == null) {
+      envelope.groupId = this.identity.groupId;
+    }
+    if (this.identity.name && envelope.name == null) {
+      envelope.name = this.identity.name;
+    }
+
+    this.socket.send(JSON.stringify(envelope));
   }
 
   disconnect() {
@@ -53,6 +77,7 @@ class FlowWebSocket {
       this.socket.close();
       this.socket = null;
     }
+    this.identity = { userId: '', groupId: '', name: '' };
   }
 
   isConnected() {

@@ -1,26 +1,66 @@
 const { WebSocketServer } = require('ws');
+const { pool } = require('../config/db');
 
 // In-memory room registry: groupId → Set<ws>
 const rooms = new Map();
 // User → ws mapping
 const userSockets = new Map();
+// Per-user audio sequence numbers
+const speakerSeq = new Map();
+
+function startHeartbeat(ws) {
+  ws.on('pong', () => {
+    if (ws.pongTimeout) {
+      clearTimeout(ws.pongTimeout);
+      ws.pongTimeout = null;
+    }
+  });
+
+  ws.heartbeatInterval = setInterval(() => {
+    if (ws.readyState !== 1) return;
+    try {
+      ws.ping();
+      if (ws.pongTimeout) clearTimeout(ws.pongTimeout);
+      ws.pongTimeout = setTimeout(() => {
+        console.warn('[WS] Closing stale connection');
+        ws.terminate();
+      }, 10000);
+    } catch (err) {
+      console.error('[WS] Heartbeat error:', err.message);
+    }
+  }, 30000);
+}
+
+function cleanupHeartbeat(ws) {
+  if (ws.heartbeatInterval) {
+    clearInterval(ws.heartbeatInterval);
+    ws.heartbeatInterval = null;
+  }
+  if (ws.pongTimeout) {
+    clearTimeout(ws.pongTimeout);
+    ws.pongTimeout = null;
+  }
+}
 
 function setupWebSocket(server) {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('connection', (ws, req) => {
     console.log('[WS] New connection');
+    startHeartbeat(ws);
 
-    ws.on('message', (data) => {
+    ws.on('message', async (data) => {
       try {
         const msg = JSON.parse(data);
-        handleMessage(ws, msg);
+        await handleMessage(ws, msg);
       } catch (e) {
+        console.error('[WS] Message handling error:', e.message);
         ws.send(JSON.stringify({ type: 'error', message: 'Invalid JSON' }));
       }
     });
 
     ws.on('close', () => {
+      cleanupHeartbeat(ws);
       handleDisconnect(ws);
     });
 
@@ -33,18 +73,25 @@ function setupWebSocket(server) {
   return wss;
 }
 
-function handleMessage(ws, msg) {
+async function handleMessage(ws, msg) {
   switch (msg.type) {
 
     case 'join': {
       // { type: 'join', userId, groupId, name }
+      if (!rooms.has(msg.groupId)) rooms.set(msg.groupId, new Set());
+      const room = rooms.get(msg.groupId);
+      if (room.size >= 20) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Room is full (max 20 members)' }));
+        ws.close(1008, 'room_full');
+        return;
+      }
+
       ws.userId = msg.userId;
       ws.groupId = msg.groupId;
       ws.name = msg.name;
       userSockets.set(msg.userId, ws);
-
-      if (!rooms.has(msg.groupId)) rooms.set(msg.groupId, new Set());
-      rooms.get(msg.groupId).add(ws);
+      room.add(ws);
+      speakerSeq.set(msg.userId, 0);
 
       broadcastToGroup(msg.groupId, {
         type: 'member_joined',
@@ -65,6 +112,21 @@ function handleMessage(ws, msg) {
         lng: msg.lng,
         ts: Date.now(),
       }, ws);
+
+      try {
+        await pool.query(
+          `INSERT INTO locations (user_id, group_id, lat, lng, updated_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (user_id) DO UPDATE
+           SET group_id = excluded.group_id,
+               lat = excluded.lat,
+               lng = excluded.lng,
+               updated_at = now()`,
+          [msg.userId, msg.groupId, msg.lat, msg.lng]
+        );
+      } catch (err) {
+        console.error('[WS] Location persistence failed:', err.message);
+      }
       break;
     }
 
@@ -88,10 +150,13 @@ function handleMessage(ws, msg) {
 
     case 'audio_chunk': {
       // { type: 'audio_chunk', userId, groupId, data: <base64 opus frame> }
+      const nextSeq = (speakerSeq.get(msg.userId) || 0) + 1;
+      speakerSeq.set(msg.userId, nextSeq);
       broadcastToGroup(msg.groupId, {
         type: 'audio_chunk',
         userId: msg.userId,
         data: msg.data,
+        seqNum: nextSeq,
       }, ws);
       break;
     }
@@ -115,9 +180,16 @@ function handleMessage(ws, msg) {
 }
 
 function handleDisconnect(ws) {
-  if (ws.userId) userSockets.delete(ws.userId);
+  if (ws.userId) {
+    userSockets.delete(ws.userId);
+    speakerSeq.delete(ws.userId);
+  }
   if (ws.groupId && rooms.has(ws.groupId)) {
-    rooms.get(ws.groupId).delete(ws);
+    const room = rooms.get(ws.groupId);
+    room.delete(ws);
+    if (room.size === 0) {
+      rooms.delete(ws.groupId);
+    }
     broadcastToGroup(ws.groupId, {
       type: 'member_left',
       userId: ws.userId,

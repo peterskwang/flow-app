@@ -20,7 +20,7 @@ const SosScreen = () => {
     try {
       setSending(true);
       await api.post('/api/sos');
-      wsClient.send({ type: 'sos', payload: { timestamp: Date.now() } });
+      wsClient.send({ type: 'sos', ts: Date.now() });
       setActive(true);
     } catch (error) {
       console.error('SOS failed', error);

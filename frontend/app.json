@@ -5,28 +5,23 @@
     "version": "1.0.0",
     "scheme": "flow",
     "orientation": "portrait",
-    "owner": "peterskwang",
-    "platforms": ["ios", "android", "web"],
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
+    "platforms": ["ios", "android"],
+    "userInterfaceStyle": "dark",
     "android": {
       "package": "com.apex.flow"
     },
     "ios": {
-      "bundleIdentifier": "com.apex.flow"
+      "bundleIdentifier": "com.apex.flow",
+      "supportsTablet": false
     },
     "plugins": [
-      "expo-router"
-    ],
-    "extra": {
-      "router": {
-        "origin": "auto"
-      }
-    }
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "FLOW needs location to show your position on the ski map."
+        }
+      ]
+    ]
   }
 }
