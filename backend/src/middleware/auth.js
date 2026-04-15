@@ -9,19 +9,18 @@ async function requireAuth(req, res, next) {
   const token = authHeader.slice(7);
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const result = await pool.query('SELECT id, name, banned_at FROM users WHERE id = $1', [decoded.userId]);
-    if (result.rowCount === 0) {
-      return res.status(401).json({ error: 'User not found' });
-    }
-    const userRecord = result.rows[0];
-    if (userRecord.banned_at) {
+    // Check if user is banned
+    const result = await pool.query('SELECT banned_at FROM users WHERE id = $1', [decoded.userId]);
+    if (result.rows.length > 0 && result.rows[0].banned_at) {
       return res.status(403).json({ error: 'Account banned' });
     }
-    req.user = { ...decoded, name: userRecord.name };
+    req.user = decoded;
     next();
   } catch (e) {
-    console.error('[auth] token verification failed:', e.message);
-    return res.status(401).json({ error: 'Invalid or expired token' });
+    if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+    return res.status(500).json({ error: 'Auth error' });
   }
 }
 
