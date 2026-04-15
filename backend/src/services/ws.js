@@ -8,6 +8,27 @@ const userSockets = new Map();
 // Per-user audio sequence numbers
 const speakerSeq = new Map();
 
+async function ensureUserAllowed(userId) {
+  if (!userId) {
+    const err = new Error('missing_user');
+    err.code = 'missing_user';
+    throw err;
+  }
+  const result = await pool.query('SELECT id, name, banned_at FROM users WHERE id = $1', [userId]);
+  if (result.rowCount === 0) {
+    const err = new Error('user_not_found');
+    err.code = 'user_not_found';
+    throw err;
+  }
+  const record = result.rows[0];
+  if (record.banned_at) {
+    const err = new Error('user_banned');
+    err.code = 'user_banned';
+    throw err;
+  }
+  return record;
+}
+
 function startHeartbeat(ws) {
   ws.on('pong', () => {
     if (ws.pongTimeout) {
@@ -45,7 +66,7 @@ function cleanupHeartbeat(ws) {
 function setupWebSocket(server) {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', (ws) => {
     console.log('[WS] New connection');
     startHeartbeat(ws);
 
@@ -75,36 +96,44 @@ function setupWebSocket(server) {
 
 async function handleMessage(ws, msg) {
   switch (msg.type) {
-
     case 'join': {
-      // { type: 'join', userId, groupId, name }
-      if (!rooms.has(msg.groupId)) rooms.set(msg.groupId, new Set());
-      const room = rooms.get(msg.groupId);
-      if (room.size >= 20) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Room is full (max 20 members)' }));
-        ws.close(1008, 'room_full');
-        return;
+      try {
+        const userRecord = await ensureUserAllowed(msg.userId);
+        if (!rooms.has(msg.groupId)) rooms.set(msg.groupId, new Set());
+        const room = rooms.get(msg.groupId);
+        if (room.size >= 20) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Room is full (max 20 members)' }));
+          ws.close(1008, 'room_full');
+          return;
+        }
+
+        ws.userId = msg.userId;
+        ws.groupId = msg.groupId;
+        ws.name = msg.name || userRecord.name;
+        userSockets.set(msg.userId, ws);
+        room.add(ws);
+        speakerSeq.set(msg.userId, 0);
+
+        broadcastToGroup(msg.groupId, {
+          type: 'member_joined',
+          userId: msg.userId,
+          name: ws.name,
+        }, ws);
+
+        ws.send(JSON.stringify({ type: 'joined', groupId: msg.groupId }));
+      } catch (err) {
+        if (err.code === 'user_banned') {
+          ws.send(JSON.stringify({ type: 'error', message: 'Account banned' }));
+          ws.close(4001, 'banned');
+          return;
+        }
+        ws.send(JSON.stringify({ type: 'error', message: 'Unable to join room' }));
+        ws.close(1011, 'join_failed');
       }
-
-      ws.userId = msg.userId;
-      ws.groupId = msg.groupId;
-      ws.name = msg.name;
-      userSockets.set(msg.userId, ws);
-      room.add(ws);
-      speakerSeq.set(msg.userId, 0);
-
-      broadcastToGroup(msg.groupId, {
-        type: 'member_joined',
-        userId: msg.userId,
-        name: msg.name,
-      }, ws);
-
-      ws.send(JSON.stringify({ type: 'joined', groupId: msg.groupId }));
       break;
     }
 
     case 'location': {
-      // { type: 'location', userId, groupId, lat, lng }
       broadcastToGroup(msg.groupId, {
         type: 'location',
         userId: msg.userId,
@@ -131,7 +160,6 @@ async function handleMessage(ws, msg) {
     }
 
     case 'ptt_start': {
-      // { type: 'ptt_start', userId, groupId }
       broadcastToGroup(msg.groupId, {
         type: 'ptt_start',
         userId: msg.userId,
@@ -149,7 +177,6 @@ async function handleMessage(ws, msg) {
     }
 
     case 'audio_chunk': {
-      // { type: 'audio_chunk', userId, groupId, data: <base64 opus frame> }
       const nextSeq = (speakerSeq.get(msg.userId) || 0) + 1;
       speakerSeq.set(msg.userId, nextSeq);
       broadcastToGroup(msg.groupId, {
@@ -162,7 +189,6 @@ async function handleMessage(ws, msg) {
     }
 
     case 'sos': {
-      // { type: 'sos', userId, groupId, lat, lng }
       broadcastToGroup(msg.groupId, {
         type: 'sos',
         userId: msg.userId,
@@ -170,7 +196,7 @@ async function handleMessage(ws, msg) {
         lat: msg.lat,
         lng: msg.lng,
         ts: Date.now(),
-      });  // broadcast to ALL including sender
+      });
       break;
     }
 
@@ -209,4 +235,16 @@ function broadcastToGroup(groupId, msg, exclude = null) {
   }
 }
 
-module.exports = { setupWebSocket };
+function disconnectUser(userId, reason = 'admin_disconnect') {
+  const socket = userSockets.get(userId);
+  if (!socket) return;
+  try {
+    socket.send(JSON.stringify({ type: 'error', message: 'Session closed by admin' }));
+  } catch (err) {
+    console.warn('[WS] Failed to notify user before disconnect:', err.message);
+  }
+  socket.close(4001, reason);
+  userSockets.delete(userId);
+}
+
+module.exports = { setupWebSocket, broadcastToGroup, disconnectUser };

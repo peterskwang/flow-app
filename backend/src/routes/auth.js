@@ -1,14 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 
 // Register / login by device_id + name
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
-  const { device_id, name } = req.body;
-  if (!device_id || !name) {
+  const resolvedName = (req.body.name || req.body.display_name || '').trim();
+  const deviceId = req.body.device_id;
+  if (!deviceId || !resolvedName) {
     return res.status(400).json({ error: 'device_id and name required' });
   }
   try {
@@ -17,11 +17,11 @@ router.post('/register', async (req, res) => {
       `INSERT INTO users (device_id, name)
        VALUES ($1, $2)
        ON CONFLICT (device_id) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id, device_id, name, created_at`,
-      [device_id, name]
+       RETURNING id, device_id, name, created_at, banned_at`,
+      [deviceId, resolvedName]
     );
     const user = result.rows[0];
-    if (user.banned) {
+    if (user.banned_at) {
       return res.status(403).json({ error: 'Account banned' });
     }
     const token = jwt.sign(
