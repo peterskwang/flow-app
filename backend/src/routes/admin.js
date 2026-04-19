@@ -43,7 +43,7 @@ router.get('/sos', requireAdmin, async (req, res) => {
 // POST /api/admin/users/:id/ban
 router.post('/users/:id/ban', requireAdmin, async (req, res) => {
   const result = await pool.query(
-    'UPDATE users SET banned = true, banned_at = now() WHERE id = $1 RETURNING id, banned_at',
+    'UPDATE users SET banned_at = now() WHERE id = $1 RETURNING id, banned_at',
     [req.params.id]
   );
   if (result.rowCount === 0) {
