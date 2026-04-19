@@ -73,17 +73,27 @@ router.post('/users/:id/ban', requireAdmin, async (req, res) => {
   }
 });
 
-// DELETE /api/admin/groups/:id — hard delete
+// DELETE /api/admin/groups/:id — hard delete (cascades members + locations; clears SOS refs)
 router.delete('/groups/:id', requireAdmin, async (req, res) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query('DELETE FROM groups WHERE id = $1', [req.params.id]);
+    await client.query('BEGIN');
+    // Null out group_id on SOS events (preserve audit trail, drop FK ref)
+    await client.query('UPDATE sos_events SET group_id = NULL WHERE group_id = $1', [req.params.id]);
+    // Delete the group (cascades group_members + locations via ON DELETE CASCADE)
+    const result = await client.query('DELETE FROM groups WHERE id = $1', [req.params.id]);
     if (result.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Group not found' });
     }
+    await client.query('COMMIT');
     res.json({ ok: true });
   } catch (e) {
+    await client.query('ROLLBACK');
     console.error('[admin] delete group error:', e.message);
     res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 
