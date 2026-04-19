@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 
 import api from '../services/api';
+import bleBridge, { FlowBleDevice } from '../services/ble';
 
 const SettingsScreen = () => {
   const router = useRouter();
@@ -25,6 +26,12 @@ const SettingsScreen = () => {
   const [saving, setSaving] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [pairedDevice, setPairedDevice] = useState<FlowBleDevice | null>(null);
+  const [bleConnected, setBleConnected] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanResults, setScanResults] = useState<FlowBleDevice[]>([]);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [pairError, setPairError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -38,6 +45,16 @@ const SettingsScreen = () => {
       }
     };
     loadSettings();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = bleBridge.subscribe((status) => {
+      setPairedDevice(status.pairedDevice || null);
+      setBleConnected(status.connected);
+    });
+    return () => {
+      unsubscribe?.();
+    };
   }, []);
 
   const handleSaveName = useCallback(async () => {
@@ -103,6 +120,46 @@ const SettingsScreen = () => {
     );
   }, [router]);
 
+  const handleScanForDevices = useCallback(async () => {
+    setScanning(true);
+    setPairError(null);
+    try {
+      const devices = await bleBridge.scanForDevices(5000);
+      setScanResults(devices);
+      if (!devices.length) {
+        setPairError('No FLOW devices found nearby.');
+      }
+    } catch (error: any) {
+      setPairError(error?.message || 'Scan failed');
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  const handleConnectDevice = useCallback(async (device: FlowBleDevice) => {
+    setConnectingId(device.id);
+    setPairError(null);
+    try {
+      await bleBridge.connectToDevice(device);
+      setScanResults([]);
+    } catch (error: any) {
+      setPairError(error?.message || 'Failed to pair with device');
+    } finally {
+      setConnectingId(null);
+    }
+  }, []);
+
+  const handleUnpair = useCallback(async () => {
+    setConnectingId('disconnect');
+    try {
+      await bleBridge.disconnect();
+    } catch (error: any) {
+      setPairError(error?.message || 'Failed to disconnect');
+    } finally {
+      setConnectingId(null);
+    }
+  }, []);
+
   const nameChanged = editedName.trim() !== displayName;
   const appVersion = Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0';
 
@@ -149,6 +206,56 @@ const SettingsScreen = () => {
             thumbColor={alwaysOn ? '#64ffda' : '#9fb4cc'}
           />
         </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Bluetooth Intercom</Text>
+        <View>
+          <Text style={styles.rowLabel}>
+            {pairedDevice ? `Paired with ${pairedDevice.name}` : 'No iPod paired yet'}
+          </Text>
+          <Text style={styles.rowSub}>{bleConnected ? 'Connected and ready' : 'Not connected'}</Text>
+        </View>
+        <Pressable
+          onPress={handleScanForDevices}
+          disabled={scanning}
+          style={({ pressed }) => [styles.saveButton, pressed && styles.saveButtonPressed, scanning && styles.saveButtonDisabled]}
+        >
+          {scanning ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveButtonText}>Scan for Devices</Text>}
+        </Pressable>
+        {pairError ? <Text style={styles.errorText}>{pairError}</Text> : null}
+        {scanResults.length ? (
+          <View style={styles.deviceList}>
+            {scanResults.map((device) => (
+              <Pressable
+                key={device.id}
+                style={({ pressed }) => [styles.deviceRow, pressed && styles.deviceRowPressed]}
+                onPress={() => handleConnectDevice(device)}
+              >
+                <View>
+                  <Text style={styles.deviceName}>{device.name || 'FLOW Device'}</Text>
+                  {device.rssi != null ? (
+                    <Text style={styles.deviceMeta}>Signal {device.rssi} dBm</Text>
+                  ) : null}
+                  {device.simulated ? <Text style={styles.deviceMeta}>Simulator</Text> : null}
+                </View>
+                {connectingId === device.id ? <ActivityIndicator color="#64ffda" /> : null}
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        {pairedDevice ? (
+          <Pressable
+            onPress={handleUnpair}
+            style={({ pressed }) => [styles.leaveButton, pressed && styles.leaveButtonPressed, connectingId === 'disconnect' && styles.saveButtonDisabled]}
+          >
+            {connectingId === 'disconnect' ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.leaveButtonText}>Unpair</Text>
+            )}
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.section}>
@@ -202,6 +309,21 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   rowLabel: { color: '#fff', fontSize: 16 },
   rowSub: { color: '#7f8ea3', fontSize: 13, marginTop: 2 },
+  errorText: { color: '#ff8a80', textAlign: 'center' },
+  deviceList: { gap: 8 },
+  deviceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#1e3a5f',
+    borderRadius: 12
+  },
+  deviceRowPressed: { backgroundColor: '#0d1f30' },
+  deviceName: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  deviceMeta: { color: '#7f8ea3', fontSize: 12 },
   leaveButton: {
     backgroundColor: '#b71c1c',
     borderRadius: 10,

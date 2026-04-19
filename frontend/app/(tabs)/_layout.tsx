@@ -65,6 +65,13 @@ const TabsLayout = () => {
         }}
       />
       <Tabs.Screen
+        name="ipod"
+        options={{
+          title: 'iPod',
+          tabBarIcon: ({ color, size }) => <Ionicons name="headset-outline" color={color} size={size} />
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',

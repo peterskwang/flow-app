@@ -5,6 +5,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 
 import wsClient from '../services/ws';
+import bleBridge from '../services/ble';
 
 interface Identity {
   userId: string;
@@ -260,6 +261,7 @@ const IntercomScreen = () => {
           });
           if (base64) {
             wsClient.send({ type: 'audio_chunk', data: base64 });
+            bleBridge.mirrorPttChunk(base64);
           }
           await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => null);
         }

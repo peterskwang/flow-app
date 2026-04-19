@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebView } from 'react-native-webview';
 
@@ -9,6 +9,7 @@ import {
   startLocationTracking,
   stopLocationTracking
 } from '../services/location';
+import wsClient from '../services/ws';
 
 interface Teammate {
   id: string;
@@ -92,7 +93,11 @@ const MapScreen = () => {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [sosSending, setSosSending] = useState(false);
+  const [sosSent, setSosSent] = useState(false);
+  const [sosModal, setSosModal] = useState<{ username: string; lat: number; lng: number; triggered_at?: string } | null>(null);
   const webViewRef = useRef<WebView>(null);
+  const pulseScale = useRef(new Animated.Value(1)).current;
 
   const postToMap = useCallback((msg: object) => {
     webViewRef.current?.postMessage(JSON.stringify(msg));
@@ -107,6 +112,25 @@ const MapScreen = () => {
   useEffect(() => {
     postToMap({ type: 'setTeammates', teammates });
   }, [teammates, postToMap]);
+
+  useEffect(() => {
+    if (!sosSent) {
+      pulseScale.setValue(1);
+      return;
+    }
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseScale, { toValue: 1.08, duration: 500, useNativeDriver: true }),
+        Animated.timing(pulseScale, { toValue: 1, duration: 500, useNativeDriver: true })
+      ])
+    );
+    animation.start();
+    const timeout = setTimeout(() => setSosSent(false), 3000);
+    return () => {
+      animation.stop();
+      clearTimeout(timeout);
+    };
+  }, [pulseScale, sosSent]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -148,6 +172,23 @@ const MapScreen = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const handler = (message: any) => {
+      if (message?.type === 'sos_alert') {
+        setSosModal({
+          username: message.username || 'Teammate',
+          lat: Number(message.lat),
+          lng: Number(message.lng),
+          triggered_at: message.triggered_at
+        });
+      }
+    };
+    wsClient.on('message', handler);
+    return () => {
+      wsClient.off('message', handler);
+    };
+  }, []);
+
   const fetchTeammates = async (activeGroupId: string) => {
     try {
       const response = await api.get(`/api/locations/${activeGroupId}`);
@@ -160,7 +201,35 @@ const MapScreen = () => {
     }
   };
 
+  const handleSosLongPress = useCallback(async () => {
+    if (!groupId) {
+      Alert.alert('Join a group', 'Join a group before sending an SOS alert.');
+      return;
+    }
+    if (!coords) {
+      Alert.alert('Location unavailable', 'Wait for GPS lock before sending SOS.');
+      return;
+    }
+    if (sosSending) return;
+    try {
+      setSosSending(true);
+      await api.post('/api/sos', {
+        group_id: groupId,
+        lat: coords.latitude,
+        lng: coords.longitude
+      });
+      setSosSent(true);
+    } catch (error: any) {
+      console.error('SOS dispatch failed', error);
+      const message = error?.response?.data?.error || error?.message || 'Unable to reach the server';
+      Alert.alert('SOS Failed', message);
+    } finally {
+      setSosSending(false);
+    }
+  }, [coords, groupId, sosSending]);
+
   const teammateData = useMemo(() => teammates.filter(Boolean), [teammates]);
+  const sosAnimatedStyle = sosSent ? { transform: [{ scale: pulseScale }] } : undefined;
 
   if (loading) {
     return (
@@ -180,7 +249,8 @@ const MapScreen = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <>
+      <View style={styles.container}>
       <View style={styles.mapContainer}>
         <WebView
           ref={webViewRef}
@@ -221,7 +291,49 @@ const MapScreen = () => {
           )}
         />
       </View>
+
+      <View style={styles.sosWrapper}>
+        <Pressable
+          onLongPress={handleSosLongPress}
+          delayLongPress={1500}
+          style={({ pressed }) => [styles.sosButton, pressed && styles.sosButtonPressed]}
+        >
+          <Animated.View
+            style={[styles.sosCircle, (sosSent || sosSending) && styles.sosCircleActive, sosAnimatedStyle]}
+          >
+            {sosSending ? <ActivityIndicator color="#fff" /> : <Text style={styles.sosLabel}>SOS</Text>}
+          </Animated.View>
+        </Pressable>
+        <Text style={styles.helper}>Long press to alert your squad.</Text>
+        {sosSent ? <Text style={styles.sosStatusText}>SOS SENT</Text> : null}
+      </View>
     </View>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={Boolean(sosModal)}
+        onRequestClose={() => setSosModal(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>SOS Alert</Text>
+            {sosModal ? (
+              <>
+                <Text style={styles.modalSubtitle}>{sosModal.username} needs assistance.</Text>
+                <Text style={styles.modalCoords}>
+                  {Number.isFinite(sosModal.lat) ? sosModal.lat.toFixed(4) : '--'},
+                  {Number.isFinite(sosModal.lng) ? sosModal.lng.toFixed(4) : '--'}
+                </Text>
+                <Pressable style={styles.modalButton} onPress={() => setSosModal(null)}>
+                  <Text style={styles.modalButtonText}>Got it</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 };
 
@@ -237,7 +349,32 @@ const styles = StyleSheet.create({
   teammateCoords: { color: '#90caf9', fontSize: 14 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#06121f' },
   statusText: { marginTop: 8, color: '#9fb4cc', textAlign: 'center' },
-  error: { color: '#ff8a80', marginBottom: 8 }
+  error: { color: '#ff8a80', marginBottom: 8 },
+  sosWrapper: { alignItems: 'center', paddingVertical: 24 },
+  sosButton: { padding: 12 },
+  sosButtonPressed: { opacity: 0.9 },
+  sosCircle: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: '#b71c1c',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#b71c1c',
+    shadowOpacity: 0.6,
+    shadowRadius: 18
+  },
+  sosCircleActive: { backgroundColor: '#d32f2f' },
+  sosLabel: { color: '#fff', fontSize: 28, fontWeight: '800' },
+  helper: { marginTop: 12, color: '#f8bbd0', textAlign: 'center' },
+  sosStatusText: { marginTop: 6, color: '#ff8a80', fontWeight: '700' },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  modalCard: { width: '80%', backgroundColor: '#0f2238', borderRadius: 16, padding: 24, alignItems: 'center', gap: 12 },
+  modalTitle: { fontSize: 20, fontWeight: '800', color: '#fff' },
+  modalSubtitle: { color: '#ffb74d', textAlign: 'center' },
+  modalCoords: { color: '#64ffda', fontSize: 16, fontWeight: '600' },
+  modalButton: { marginTop: 8, backgroundColor: '#1e88e5', paddingHorizontal: 28, paddingVertical: 12, borderRadius: 30 },
+  modalButtonText: { color: '#fff', fontWeight: '700' }
 });
 
 export default MapScreen;

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/db');
+const { disconnectUser } = require('../services/ws');
 
 // Simple password auth for admin
 function requireAdmin(req, res, next) {
@@ -14,7 +15,7 @@ function requireAdmin(req, res, next) {
 // GET /api/admin/users
 router.get('/users', requireAdmin, async (req, res) => {
   const result = await pool.query(
-    'SELECT id, device_id, name, created_at, banned FROM users ORDER BY created_at DESC'
+    'SELECT id, device_id, name, created_at, banned_at FROM users ORDER BY created_at DESC'
   );
   res.json(result.rows);
 });
@@ -22,7 +23,7 @@ router.get('/users', requireAdmin, async (req, res) => {
 // GET /api/admin/groups
 router.get('/groups', requireAdmin, async (req, res) => {
   const result = await pool.query(
-    `SELECT g.*, COUNT(gm.user_id) as member_count
+    `SELECT g.*, COUNT(gm.user_id)::int as member_count
      FROM groups g LEFT JOIN group_members gm ON gm.group_id = g.id
      GROUP BY g.id ORDER BY g.created_at DESC`
   );
@@ -41,13 +42,23 @@ router.get('/sos', requireAdmin, async (req, res) => {
 
 // POST /api/admin/users/:id/ban
 router.post('/users/:id/ban', requireAdmin, async (req, res) => {
-  await pool.query('UPDATE users SET banned=true WHERE id=$1', [req.params.id]);
-  res.json({ ok: true });
+  const result = await pool.query(
+    'UPDATE users SET banned = true, banned_at = now() WHERE id = $1 RETURNING id, banned_at',
+    [req.params.id]
+  );
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  disconnectUser(req.params.id, 'banned');
+  res.json({ ok: true, banned_at: result.rows[0].banned_at });
 });
 
-// POST /api/admin/groups/:id/close
-router.post('/groups/:id/close', requireAdmin, async (req, res) => {
-  await pool.query('UPDATE groups SET closed_at=now() WHERE id=$1', [req.params.id]);
+// DELETE /api/admin/groups/:id — hard delete
+router.delete('/groups/:id', requireAdmin, async (req, res) => {
+  const result = await pool.query('DELETE FROM groups WHERE id = $1', [req.params.id]);
+  if (result.rowCount === 0) {
+    return res.status(404).json({ error: 'Group not found' });
+  }
   res.json({ ok: true });
 });
 
