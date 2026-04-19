@@ -14,52 +14,77 @@ function requireAdmin(req, res, next) {
 
 // GET /api/admin/users
 router.get('/users', requireAdmin, async (req, res) => {
-  const result = await pool.query(
-    'SELECT id, device_id, name, created_at, banned_at FROM users ORDER BY created_at DESC'
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      'SELECT id, device_id, name, created_at, banned_at FROM users ORDER BY created_at DESC'
+    );
+    res.json(result.rows);
+  } catch (e) {
+    console.error('[admin] list users error:', e.message);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // GET /api/admin/groups
 router.get('/groups', requireAdmin, async (req, res) => {
-  const result = await pool.query(
-    `SELECT g.*, COUNT(gm.user_id)::int as member_count
-     FROM groups g LEFT JOIN group_members gm ON gm.group_id = g.id
-     GROUP BY g.id ORDER BY g.created_at DESC`
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      `SELECT g.*, COUNT(gm.user_id)::int as member_count
+       FROM groups g LEFT JOIN group_members gm ON gm.group_id = g.id
+       GROUP BY g.id ORDER BY g.created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (e) {
+    console.error('[admin] list groups error:', e.message);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // GET /api/admin/sos
 router.get('/sos', requireAdmin, async (req, res) => {
-  const result = await pool.query(
-    `SELECT s.*, u.name as user_name
-     FROM sos_events s JOIN users u ON u.id = s.user_id
-     ORDER BY s.triggered_at DESC LIMIT 100`
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      `SELECT s.*, u.name as user_name
+       FROM sos_events s JOIN users u ON u.id = s.user_id
+       ORDER BY s.triggered_at DESC LIMIT 100`
+    );
+    res.json(result.rows);
+  } catch (e) {
+    console.error('[admin] list sos error:', e.message);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // POST /api/admin/users/:id/ban
 router.post('/users/:id/ban', requireAdmin, async (req, res) => {
-  const result = await pool.query(
-    'UPDATE users SET banned_at = now() WHERE id = $1 RETURNING id, banned_at',
-    [req.params.id]
-  );
-  if (result.rowCount === 0) {
-    return res.status(404).json({ error: 'User not found' });
+  try {
+    const result = await pool.query(
+      'UPDATE users SET banned_at = now() WHERE id = $1 RETURNING id, banned_at',
+      [req.params.id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    disconnectUser(req.params.id, 'banned');
+    res.json({ ok: true, banned_at: result.rows[0].banned_at });
+  } catch (e) {
+    console.error('[admin] ban user error:', e.message);
+    res.status(500).json({ error: 'Server error' });
   }
-  disconnectUser(req.params.id, 'banned');
-  res.json({ ok: true, banned_at: result.rows[0].banned_at });
 });
 
 // DELETE /api/admin/groups/:id — hard delete
 router.delete('/groups/:id', requireAdmin, async (req, res) => {
-  const result = await pool.query('DELETE FROM groups WHERE id = $1', [req.params.id]);
-  if (result.rowCount === 0) {
-    return res.status(404).json({ error: 'Group not found' });
+  try {
+    const result = await pool.query('DELETE FROM groups WHERE id = $1', [req.params.id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[admin] delete group error:', e.message);
+    res.status(500).json({ error: 'Server error' });
   }
-  res.json({ ok: true });
 });
 
 module.exports = router;
