@@ -32,7 +32,7 @@ export default function GroupsPage() {
       await adminApi.deleteGroup(group.id);
       setGroups((prev) => prev.filter((g) => g.id !== group.id));
     } catch (e: any) {
-      alert(`Failed to delete group: ${e.message}`);
+      setError(`Failed to delete group: ${e.message}`);
     } finally {
       setDeleting(null);
     }
