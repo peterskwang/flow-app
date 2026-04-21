@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../config/db');
 const { disconnectUser } = require('../services/ws');
+const { sendSosPush } = require('../services/push_notifications');
 
 // Simple password auth for admin
 function requireAdmin(req, res, next) {
@@ -94,6 +95,73 @@ router.delete('/groups/:id', requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   } finally {
     client.release();
+  }
+});
+
+// POST /api/admin/notify — send push notification to all users in a group (or all users)
+router.post('/notify', requireAdmin, async (req, res) => {
+  const { group_id, title, body } = req.body || {};
+  if (!title || !body) {
+    return res.status(400).json({ error: 'title and body required' });
+  }
+
+  try {
+    let userIds;
+    if (group_id) {
+      const result = await pool.query(
+        'SELECT user_id FROM group_members WHERE group_id = $1',
+        [group_id]
+      );
+      userIds = result.rows.map((r) => r.user_id);
+    } else {
+      const result = await pool.query(
+        'SELECT user_id FROM push_tokens'
+      );
+      userIds = result.rows.map((r) => r.user_id);
+    }
+
+    if (userIds.length === 0) {
+      return res.json({ ok: true, sent: 0, message: 'No registered devices found' });
+    }
+
+    // Fetch tokens
+    const placeholders = userIds.map((_, i) => `$${i + 1}`).join(', ');
+    const tokensResult = await pool.query(
+      `SELECT token FROM push_tokens WHERE user_id IN (${placeholders})`,
+      userIds
+    );
+    const tokens = tokensResult.rows.map((r) => r.token);
+
+    if (tokens.length === 0) {
+      return res.json({ ok: true, sent: 0, message: 'No push tokens registered' });
+    }
+
+    // Send via Expo Push API
+    const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+    const messages = tokens.map((to) => ({
+      to,
+      sound: 'default',
+      title,
+      body,
+      priority: 'normal',
+    }));
+
+    const response = await fetch(EXPO_PUSH_URL, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(messages),
+    });
+
+    const result = await response.json();
+    console.log(`[admin] notify: sent to ${tokens.length} devices`, JSON.stringify(result?.data?.slice(0, 3)));
+    res.json({ ok: true, sent: tokens.length });
+  } catch (e) {
+    console.error('[admin] notify error:', e.message);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
