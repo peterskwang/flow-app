@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Share, Clipboard } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Share, Alert } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './services/api';
@@ -21,7 +22,8 @@ export default function CreateGroupScreen() {
       setInviteCode(invite_code);
       setCreated(true);
     } catch (e: any) {
-      alert(e?.response?.data?.error || 'Failed to create group');
+      const message = e?.response?.data?.error || 'Failed to create group';
+      Alert.alert('Create group failed', message);
     } finally {
       setLoading(false);
     }
@@ -31,10 +33,11 @@ export default function CreateGroupScreen() {
     await Share.share({ message: `Join my FLOW group with code: ${inviteCode}` });
   };
 
-  const handleCopy = () => {
-    Clipboard.setString(inviteCode);
-    alert('Invite code copied!');
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(inviteCode);
+    Alert.alert('Invite code copied!', 'Share it with your crew.');
   };
+
 
   if (created) {
     return (
