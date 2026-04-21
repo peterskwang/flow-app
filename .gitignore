@@ -8,3 +8,4 @@ build/
 *.log
 pm2.log
 *.pid
+.next

@@ -12,16 +12,32 @@
     },
     "ios": {
       "bundleIdentifier": "com.apex.flow",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "FLOW uses your location to show your position on the ski map and share it with your group even when the app is in the background.",
+        "NSLocationAlwaysUsageDescription": "FLOW needs Always location access to track your position while skiing with the app in the background.",
+        "UIBackgroundModes": ["location", "fetch"]
+      }
     },
     "plugins": [
       "expo-router",
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "FLOW needs location to show your position on the ski map."
+          "locationAlwaysAndWhenInUsePermission": "FLOW needs location to show your position on the ski map.",
+          "locationAlwaysPermission": "FLOW uses background location to share your position with your ski group while the app is in the background.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
         }
-      ]
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1e88e5",
+          "sounds": []
+        }
+      ],
+      "expo-task-manager"
     ]
   }
 }

@@ -4,6 +4,7 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import wsClient from '../services/ws';
+import '../services/backgroundLocation';
 
 const STORAGE_KEYS = ['userId', 'groupId', 'displayName'] as const;
 
