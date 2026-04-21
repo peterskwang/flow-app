@@ -6,6 +6,7 @@ import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
 
 import api from './services/api';
+import { registerForPushNotifications } from './services/push';
 
 const STORAGE_KEYS = {
   token: 'token',
@@ -25,7 +26,12 @@ const RegisterScreen = () => {
     const bootstrap = async () => {
       const token = await AsyncStorage.getItem(STORAGE_KEYS.token);
       if (token) {
-        router.replace('/(tabs)/map');
+        const groupId = await AsyncStorage.getItem(STORAGE_KEYS.groupId);
+        if (groupId) {
+          router.replace('/(tabs)/map');
+        } else {
+          router.replace('/group-setup');
+        }
       }
     };
 
@@ -71,7 +77,13 @@ const RegisterScreen = () => {
         await AsyncStorage.setItem(STORAGE_KEYS.groupId, resolvedGroupId);
       }
 
-      router.replace('/(tabs)/map');
+      registerForPushNotifications().catch(() => null);
+
+      if (resolvedGroupId) {
+        router.replace('/(tabs)/map');
+      } else {
+        router.replace('/group-setup');
+      }
     } catch (joinError: any) {
       console.error('Registration failed', joinError);
       const message = joinError?.response?.data?.message || joinError?.message || 'Unable to register';

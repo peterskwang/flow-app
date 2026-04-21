@@ -4,6 +4,7 @@ import {
   Alert,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -13,9 +14,16 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
+import * as Clipboard from 'expo-clipboard';
+import * as Location from 'expo-location';
 
 import api from '../services/api';
 import bleBridge, { FlowBleDevice } from '../services/ble';
+import {
+  isBackgroundLocationRunning,
+  startBackgroundLocationTask,
+  stopBackgroundLocationTask
+} from '../services/backgroundLocation';
 
 const SettingsScreen = () => {
   const router = useRouter();
@@ -32,6 +40,8 @@ const SettingsScreen = () => {
   const [scanResults, setScanResults] = useState<FlowBleDevice[]>([]);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [pairError, setPairError] = useState<string | null>(null);
+  const [currentGroup, setCurrentGroup] = useState<{ name: string; invite_code: string } | null>(null);
+  const [groupLoading, setGroupLoading] = useState(false);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -39,12 +49,37 @@ const SettingsScreen = () => {
         const [[, name], [, alwaysOnVal]] = await AsyncStorage.multiGet(['displayName', 'alwaysOn']);
         setDisplayName(name || '');
         setEditedName(name || '');
-        setAlwaysOn(alwaysOnVal === 'true');
+        const running = await isBackgroundLocationRunning();
+        setAlwaysOn(running);
+        if (alwaysOnVal === 'true' && !running) {
+          await AsyncStorage.setItem('alwaysOn', 'false');
+        }
       } catch (error) {
         console.warn('Failed to load settings', error);
       }
     };
     loadSettings();
+  }, []);
+
+  useEffect(() => {
+    const loadGroupInfo = async () => {
+      try {
+        setGroupLoading(true);
+        const response = await api.get('/api/groups/mine');
+        const groups = response.data;
+        if (Array.isArray(groups) && groups.length > 0) {
+          const group = groups[0];
+          setCurrentGroup({ name: group.name, invite_code: group.invite_code });
+        } else {
+          setCurrentGroup(null);
+        }
+      } catch (error) {
+        console.warn('[settings] Failed to load group info', error);
+      } finally {
+        setGroupLoading(false);
+      }
+    };
+    loadGroupInfo();
   }, []);
 
   useEffect(() => {
@@ -83,8 +118,39 @@ const SettingsScreen = () => {
   }, [editedName]);
 
   const handleToggleAlwaysOn = useCallback(async (value: boolean) => {
-    setAlwaysOn(value);
-    await AsyncStorage.setItem('alwaysOn', value ? 'true' : 'false');
+    if (value) {
+      try {
+        const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+        if (fgStatus !== 'granted') {
+          Alert.alert('Permission Required', 'Location permission is required for Always-On Mode.');
+          return;
+        }
+
+        const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+        if (bgStatus !== 'granted') {
+          Alert.alert(
+            'Background Permission Denied',
+            'FLOW needs "Always" location access for Always-On Mode. Enable it in Settings > FLOW > Location > Always.'
+          );
+          return;
+        }
+
+        await startBackgroundLocationTask();
+        setAlwaysOn(true);
+        await AsyncStorage.setItem('alwaysOn', 'true');
+      } catch (error: any) {
+        console.error('[settings] Failed to start background GPS:', error?.message);
+        Alert.alert('Error', 'Could not start background location tracking.');
+      }
+    } else {
+      try {
+        await stopBackgroundLocationTask();
+      } catch (error) {
+        console.warn('[settings] Failed to stop background GPS:', error);
+      }
+      setAlwaysOn(false);
+      await AsyncStorage.setItem('alwaysOn', 'false');
+    }
   }, []);
 
   const handleLeaveGroup = useCallback(() => {
@@ -107,7 +173,12 @@ const SettingsScreen = () => {
                   console.warn('Leave group API failed (proceeding anyway)', error);
                 }
               }
-              await AsyncStorage.multiRemove(['groupId', 'token', 'userId']);
+              try {
+                await stopBackgroundLocationTask();
+              } catch (error) {
+                console.warn('[settings] Stop BG GPS on leave failed:', error);
+              }
+              await AsyncStorage.multiRemove(['groupId', 'token', 'userId', 'alwaysOn']);
               router.replace('/');
             } catch (error: any) {
               Alert.alert('Error', error?.message || 'Failed to leave group');
@@ -160,6 +231,19 @@ const SettingsScreen = () => {
     }
   }, []);
 
+  const handleCopyGroupCode = useCallback(async () => {
+    if (!currentGroup) return;
+    await Clipboard.setStringAsync(currentGroup.invite_code);
+    Alert.alert('Copied!', `Code ${currentGroup.invite_code} copied.`);
+  }, [currentGroup]);
+
+  const handleShareGroupCode = useCallback(async () => {
+    if (!currentGroup) return;
+    await Share.share({
+      message: `Join my FLOW ski group "${currentGroup.name}" with code: ${currentGroup.invite_code}`
+    });
+  }, [currentGroup]);
+
   const nameChanged = editedName.trim() !== displayName;
   const appVersion = Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0';
 
@@ -197,7 +281,9 @@ const SettingsScreen = () => {
         <View style={styles.row}>
           <View>
             <Text style={styles.rowLabel}>Always-On Mode</Text>
-            <Text style={styles.rowSub}>Keep location active in background</Text>
+            <Text style={styles.rowSub}>
+              {alwaysOn ? 'Broadcasting location in background' : 'GPS stops when app is backgrounded'}
+            </Text>
           </View>
           <Switch
             value={alwaysOn}
@@ -256,6 +342,28 @@ const SettingsScreen = () => {
             )}
           </Pressable>
         ) : null}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Current Group</Text>
+        {groupLoading ? (
+          <ActivityIndicator color="#1e88e5" />
+        ) : currentGroup ? (
+          <>
+            <Text style={styles.rowLabel}>{currentGroup.name}</Text>
+            <View style={styles.codeRow}>
+              <Text style={styles.inviteCode}>{currentGroup.invite_code}</Text>
+              <Pressable onPress={handleCopyGroupCode} style={styles.codeAction}>
+                <Text style={styles.codeActionText}>Copy</Text>
+              </Pressable>
+              <Pressable onPress={handleShareGroupCode} style={styles.codeAction}>
+                <Text style={styles.codeActionText}>Share</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <Text style={styles.rowSub}>Not in a group</Text>
+        )}
       </View>
 
       <View style={styles.section}>
@@ -324,6 +432,17 @@ const styles = StyleSheet.create({
   deviceRowPressed: { backgroundColor: '#0d1f30' },
   deviceName: { color: '#fff', fontSize: 16, fontWeight: '600' },
   deviceMeta: { color: '#7f8ea3', fontSize: 12 },
+  codeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  inviteCode: { color: '#64ffda', fontSize: 24, fontWeight: '900', letterSpacing: 6, flex: 1 },
+  codeAction: {
+    backgroundColor: '#13273c',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#26445f'
+  },
+  codeActionText: { color: '#1e88e5', fontWeight: '700' },
   leaveButton: {
     backgroundColor: '#b71c1c',
     borderRadius: 10,
