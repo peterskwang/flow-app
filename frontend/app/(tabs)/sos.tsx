@@ -1,8 +1,11 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import api from '../services/api';
+import { requestPermissions } from '../services/location';
 import wsClient from '../services/ws';
+import * as Location from 'expo-location';
 
 const SosScreen = () => {
   const [sending, setSending] = useState(false);
@@ -19,7 +22,28 @@ const SosScreen = () => {
     if (sending) return;
     try {
       setSending(true);
-      await api.post('/api/sos');
+
+      // Get groupId from storage
+      const groupId = await AsyncStorage.getItem('groupId');
+      if (!groupId) {
+        Alert.alert('Not in a group', 'Join a group before sending an SOS.');
+        return;
+      }
+
+      // Acquire GPS coordinates
+      let lat: number | null = null;
+      let lng: number | null = null;
+      try {
+        await requestPermissions();
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        lat = loc.coords.latitude;
+        lng = loc.coords.longitude;
+      } catch (locError) {
+        console.warn('[SOS] location unavailable', locError);
+        // Allow SOS to proceed even without GPS; backend may accept partial data
+      }
+
+      await api.post('/api/sos', { group_id: groupId, lat, lng });
       wsClient.send({ type: 'sos', ts: Date.now() });
       setActive(true);
     } catch (error) {
