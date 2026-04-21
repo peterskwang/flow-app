@@ -93,7 +93,12 @@ class FlowBleBridge {
   private listeners = new Set<StateListener>();
 
   constructor() {
-    this.manager = Platform.OS === 'web' ? null : new BleManager();
+    try {
+      this.manager = Platform.OS === 'web' ? null : new BleManager();
+    } catch {
+      console.warn('[BLE] Native module unavailable — using simulation mode');
+      this.manager = null;
+    }
     this.bootstrap();
     simulationUplinkListeners.add((chunk) => this.handleIncomingChunk(chunk));
     simulationListeners.add((state) => {
