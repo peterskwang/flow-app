@@ -34,7 +34,7 @@ export default function UsersPage() {
         prev.map((u) => (u.id === user.id ? { ...u, banned_at: new Date().toISOString() } : u))
       );
     } catch (e: any) {
-      alert(`Failed to ban user: ${e.message}`);
+      setError(`Failed to ban user: ${e.message}`);
     } finally {
       setBanning(null);
     }
