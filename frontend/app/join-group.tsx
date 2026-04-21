@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './services/api';
@@ -11,7 +11,7 @@ export default function JoinGroupScreen() {
 
   const handleJoin = async () => {
     if (code.trim().length !== 6) {
-      alert('Enter a 6-character invite code');
+      Alert.alert('Invalid code', 'Enter a 6-character invite code');
       return;
     }
     setLoading(true);
@@ -21,7 +21,8 @@ export default function JoinGroupScreen() {
       await AsyncStorage.setItem('groupId', id);
       router.replace('/(tabs)/map');
     } catch (e: any) {
-      alert(e?.response?.data?.error || 'Invalid invite code');
+      const message = e?.response?.data?.error || 'Invalid invite code';
+      Alert.alert('Join failed', message);
     } finally {
       setLoading(false);
     }

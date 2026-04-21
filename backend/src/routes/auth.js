@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const { pool } = require('../config/db');
 const { requireAuth } = require('../middleware/auth');
 
+const EXPO_PUSH_TOKEN_REGEX = /^ExponentPushToken\[[^\]]+\]$/;
+
 // Register / login by device_id + name
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
@@ -43,6 +45,9 @@ router.post('/push-token', requireAuth, async (req, res) => {
   const { token, platform } = req.body || {};
   if (!token) {
     return res.status(400).json({ error: 'token required' });
+  }
+  if (!EXPO_PUSH_TOKEN_REGEX.test(token)) {
+    return res.status(400).json({ error: 'invalid token format' });
   }
 
   try {
