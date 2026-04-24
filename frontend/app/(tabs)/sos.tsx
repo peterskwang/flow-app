@@ -1,5 +1,7 @@
-import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Location from 'expo-location';
 
 import api from '../services/api';
 import wsClient from '../services/ws';
@@ -7,40 +9,109 @@ import wsClient from '../services/ws';
 const SosScreen = () => {
   const [sending, setSending] = useState(false);
   const [active, setActive] = useState(false);
+  const [groupId, setGroupId] = useState<string | null>(null);
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    let subscription: Location.LocationSubscription | null = null;
+
+    const init = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('groupId');
+        if (mounted) setGroupId(stored);
+
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          if (mounted) setLocationError('Location permission denied — needed for SOS');
+          return;
+        }
+
+        subscription = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+          (loc) => {
+            if (mounted) {
+              setCoords({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+              setLocationError(null);
+            }
+          }
+        );
+      } catch (error: any) {
+        if (mounted) setLocationError(error.message || 'Location unavailable');
+      }
+    };
+
+    init();
+    return () => {
+      mounted = false;
+      subscription?.remove();
+    };
+  }, []);
 
   const triggerSos = useCallback(() => {
+    if (!groupId) {
+      Alert.alert('No Group', 'Join a group before sending an SOS alert.');
+      return;
+    }
+    if (!coords) {
+      Alert.alert('No GPS', 'Waiting for GPS lock. Try again in a moment.');
+      return;
+    }
     Alert.alert('Confirm SOS', 'Are you sure you want to send an SOS to your group?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Send SOS', style: 'destructive', onPress: sendSos }
     ]);
-  }, []);
+  }, [groupId, coords]);
 
   const sendSos = useCallback(async () => {
-    if (sending) return;
+    if (sending || !groupId || !coords) return;
     try {
       setSending(true);
-      await api.post('/api/sos');
+      await api.post('/api/sos', {
+        group_id: groupId,
+        lat: coords.latitude,
+        lng: coords.longitude
+      });
       wsClient.send({ type: 'sos', ts: Date.now() });
       setActive(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error('SOS failed', error);
-      Alert.alert('SOS Failed', 'Could not reach the server.');
+      const message = error?.response?.data?.error || error?.message || 'Could not reach the server.';
+      Alert.alert('SOS Failed', message);
     } finally {
       setSending(false);
     }
-  }, [sending]);
+  }, [sending, groupId, coords]);
+
+  const ready = Boolean(groupId && coords);
 
   return (
     <View style={styles.container}>
       <Pressable
         onLongPress={triggerSos}
         delayLongPress={1500}
-        style={({ pressed }) => [styles.sosButton, pressed && styles.sosButtonPressed, active && styles.activeButton]}
+        disabled={sending}
+        style={({ pressed }) => [
+          styles.sosButton,
+          pressed && styles.sosButtonPressed,
+          active && styles.activeButton,
+          !ready && styles.disabledButton
+        ]}
       >
-        <Text style={styles.sosLabel}>SOS</Text>
+        {sending ? (
+          <ActivityIndicator color="#fff" size="large" />
+        ) : (
+          <Text style={styles.sosLabel}>SOS</Text>
+        )}
       </Pressable>
-      <Text style={styles.helper}>Long press for 1.5 seconds to send SOS.</Text>
-      {active ? <Text style={styles.activeText}>SOS Active</Text> : null}
+      <Text style={styles.helper}>Long press 1.5s to alert your squad.</Text>
+      {!groupId && <Text style={styles.warningText}>Join a group first</Text>}
+      {groupId && !coords && !locationError && (
+        <Text style={styles.warningText}>Acquiring GPS…</Text>
+      )}
+      {locationError && <Text style={styles.errorText}>{locationError}</Text>}
+      {active && <Text style={styles.activeText}>SOS SENT</Text>}
     </View>
   );
 };
@@ -51,7 +122,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#06121f',
-    paddingHorizontal: 24
+    paddingHorizontal: 24,
+    gap: 16
   },
   sosButton: {
     width: 220,
@@ -64,26 +136,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.7,
     shadowRadius: 18
   },
-  sosButtonPressed: {
-    backgroundColor: '#b71c1c'
-  },
-  activeButton: {
-    backgroundColor: '#7f1d1d'
-  },
-  sosLabel: {
-    color: '#fff',
-    fontSize: 48,
-    fontWeight: '900'
-  },
-  helper: {
-    marginTop: 24,
-    color: '#f8bbd0'
-  },
-  activeText: {
-    marginTop: 8,
-    color: '#ff8a80',
-    fontWeight: '700'
-  }
+  sosButtonPressed: { backgroundColor: '#b71c1c' },
+  activeButton: { backgroundColor: '#7f1d1d' },
+  disabledButton: { opacity: 0.5 },
+  sosLabel: { color: '#fff', fontSize: 48, fontWeight: '900' },
+  helper: { color: '#f8bbd0', textAlign: 'center' },
+  warningText: { color: '#ffb74d', textAlign: 'center', fontSize: 14 },
+  errorText: { color: '#ff8a80', textAlign: 'center', fontSize: 14 },
+  activeText: { color: '#ff8a80', fontWeight: '700', fontSize: 16 }
 });
 
 export default SosScreen;

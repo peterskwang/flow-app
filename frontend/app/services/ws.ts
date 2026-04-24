@@ -5,24 +5,41 @@ type ListenerMap = Record<string, Set<Listener>>;
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8100';
 const WS_URL = API_URL.replace('http', 'ws');
 
+const MIN_RECONNECT_DELAY = 1000;
+const MAX_RECONNECT_DELAY = 30000;
+
 class FlowWebSocket {
   private socket: WebSocket | null = null;
   private listeners: ListenerMap = {};
   private identity = { userId: '', groupId: '', name: '' };
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDelay = MIN_RECONNECT_DELAY;
+  private manuallyDisconnected = false;
 
   connect(userId: string, groupId: string, name: string) {
     if (!userId || !groupId) return;
+
+    this.manuallyDisconnected = false;
+    this.reconnectDelay = MIN_RECONNECT_DELAY;
+    this._clearReconnectTimer();
 
     if (this.socket) {
       this.socket.close();
     }
 
     this.identity = { userId, groupId, name };
+    this._openSocket();
+  }
+
+  private _openSocket() {
+    const { userId, groupId, name } = this.identity;
+    if (!userId || !groupId) return;
 
     const url = `${WS_URL}/ws?userId=${userId}&groupId=${groupId}&name=${encodeURIComponent(name || '')}`;
     this.socket = new WebSocket(url);
 
     this.socket.onopen = () => {
+      this.reconnectDelay = MIN_RECONNECT_DELAY;
       this.emit('status', { state: 'connected' });
       this.send({ type: 'join' });
     };
@@ -43,7 +60,20 @@ class FlowWebSocket {
 
     this.socket.onclose = () => {
       this.emit('status', { state: 'closed' });
+      if (!this.manuallyDisconnected && this.identity.userId && this.identity.groupId) {
+        this.reconnectTimeout = setTimeout(() => {
+          this.reconnectDelay = Math.min(this.reconnectDelay * 2, MAX_RECONNECT_DELAY);
+          this._openSocket();
+        }, this.reconnectDelay);
+      }
     };
+  }
+
+  private _clearReconnectTimer() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
   }
 
   send(payload: Record<string, any>) {
@@ -73,11 +103,22 @@ class FlowWebSocket {
   }
 
   disconnect() {
+    this.manuallyDisconnected = true;
+    this._clearReconnectTimer();
     if (this.socket) {
       this.socket.close();
       this.socket = null;
     }
     this.identity = { userId: '', groupId: '', name: '' };
+  }
+
+  getState(): 'connecting' | 'connected' | 'error' | 'closed' {
+    if (!this.socket) return 'closed';
+    switch (this.socket.readyState) {
+      case WebSocket.OPEN: return 'connected';
+      case WebSocket.CONNECTING: return 'connecting';
+      default: return 'closed';
+    }
   }
 
   isConnected() {

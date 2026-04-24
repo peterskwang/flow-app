@@ -24,53 +24,78 @@ const MAP_HTML = `
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="initial-scale=1, maximum-scale=1" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
       html, body, #map { height: 100%; margin: 0; padding: 0; background: #02101f; }
-      .user-marker { width:14px;height:14px;border-radius:7px;background:#64ffda;border:2px solid #02101f; }
-      .teammate-marker { padding:6px 10px;background:rgba(255,152,0,0.9);color:#02101f;border-radius:12px;font-size:12px;font-weight:700;white-space:nowrap; }
+      .teammate-label {
+        background: rgba(255,152,0,0.9);
+        color: #02101f;
+        border-radius: 12px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+        border: none;
+        box-shadow: none;
+      }
     </style>
-    <script src="https://webapi.amap.com/maps?v=1.4.15&key=YOUR_GAODE_KEY"></script>
   </head>
   <body>
     <div id="map"></div>
     <script>
-      var markers = {};
-      var map = null;
+      var map = L.map('map', { zoomControl: true }).setView([22.3193, 114.1694], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+      }).addTo(map);
+
       var userMarker = null;
-      function ensureMap() {
-        if (!map && window.AMap) {
-          map = new AMap.Map('map', { zoom: 12, center: [116.39, 39.91], viewMode: '2D' });
-        }
-      }
+      var teammateMarkers = {};
+
+      var userIcon = L.divIcon({
+        html: '<div style="width:14px;height:14px;border-radius:7px;background:#64ffda;border:2px solid #02101f;"></div>',
+        className: '',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+
       function updateUserLocation(coords) {
         if (!coords || typeof coords.latitude !== 'number') return;
-        ensureMap();
-        if (!map) return;
-        var pos = [coords.longitude, coords.latitude];
-        map.setCenter(pos);
+        var latlng = [coords.latitude, coords.longitude];
         if (!userMarker) {
-          userMarker = new AMap.Marker({ position: pos, content: '<div class="user-marker"></div>', offset: new AMap.Pixel(-7,-7) });
-          map.add(userMarker);
-        } else { userMarker.setPosition(pos); }
+          userMarker = L.marker(latlng, { icon: userIcon }).addTo(map);
+        } else {
+          userMarker.setLatLng(latlng);
+        }
+        map.setView(latlng, map.getZoom());
       }
+
       function updateTeammates(list) {
-        ensureMap();
-        if (!map || !Array.isArray(list)) return;
+        if (!Array.isArray(list)) return;
         var seen = {};
         list.forEach(function(m) {
-          if (!m || typeof m.longitude !== 'number' || typeof m.latitude !== 'number') return;
+          if (!m || typeof m.latitude !== 'number' || typeof m.longitude !== 'number') return;
           var id = m.id || m.user_id;
           if (!id) return;
           seen[id] = true;
-          if (!markers[id]) {
-            markers[id] = new AMap.Marker({ position: [m.longitude, m.latitude], content: '<div class="teammate-marker">' + (m.name || 'Teammate') + '</div>' });
-            map.add(markers[id]);
-          } else { markers[id].setPosition([m.longitude, m.latitude]); }
+          var latlng = [m.latitude, m.longitude];
+          var label = m.name || 'Teammate';
+          if (!teammateMarkers[id]) {
+            var icon = L.divIcon({ html: '<div class="teammate-label">' + label + '</div>', className: '', iconAnchor: [0, 0] });
+            teammateMarkers[id] = L.marker(latlng, { icon: icon }).addTo(map);
+          } else {
+            teammateMarkers[id].setLatLng(latlng);
+          }
         });
-        Object.keys(markers).forEach(function(key) {
-          if (!seen[key]) { map.remove(markers[key]); delete markers[key]; }
+        Object.keys(teammateMarkers).forEach(function(key) {
+          if (!seen[key]) {
+            map.removeLayer(teammateMarkers[key]);
+            delete teammateMarkers[key];
+          }
         });
       }
+
       function onMessage(event) {
         var data = event.data;
         if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) { return; } }
@@ -80,7 +105,6 @@ const MAP_HTML = `
       }
       window.addEventListener('message', onMessage);
       document.addEventListener('message', onMessage);
-      ensureMap();
     </script>
   </body>
 </html>
@@ -192,8 +216,17 @@ const MapScreen = () => {
   const fetchTeammates = async (activeGroupId: string) => {
     try {
       const response = await api.get(`/api/locations/${activeGroupId}`);
-      const list: Teammate[] = response.data?.teammates || response.data || [];
-      setTeammates(Array.isArray(list) ? list : []);
+      const raw: any[] = response.data?.teammates || response.data || [];
+      // Normalise backend field names (lat/lng) to frontend interface (latitude/longitude)
+      const list: Teammate[] = Array.isArray(raw)
+        ? raw.map((m) => ({
+            id: m.user_id || m.id,
+            name: m.name,
+            latitude: m.latitude ?? m.lat,
+            longitude: m.longitude ?? m.lng,
+          }))
+        : [];
+      setTeammates(list);
       setFetchError(null);
     } catch (error: any) {
       console.warn('Failed to fetch teammate locations', error);
