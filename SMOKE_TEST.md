@@ -44,6 +44,23 @@ Argus gate: if a PR or release does not include a completed smoke test section â
 
 ---
 
+## After Every Merge to Main â€” Do This First
+
+Before distributing the QR code to any tester, always restart Metro with a cache clear:
+
+```bash
+pm2 restart flow-frontend --update-env
+# OR for a full cache bust:
+pm2 stop flow-frontend && cd /opt/flow-app/frontend && CI=1 npx expo start --clear --lan --port 8081 &
+```
+
+Then verify the bundle is serving before handing the QR to testers:
+```bash
+curl -s http://5.223.73.76:8081/status  # should return: packager-status:running
+```
+
+Skipping this step will cause testers to get stale code or a loading timeout (issue #31).
+
 ## How to Run
 
 1. Use two physical devices (simulator cannot test audio or BLE)
