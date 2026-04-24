@@ -89,16 +89,28 @@ const IntercomScreen = () => {
         await FileSystem.writeAsStringAsync(tempFile, base64Data, {
           encoding: FileSystem.EncodingType.Base64
         });
-        const { sound } = await Audio.Sound.createAsync({ uri: tempFile }, { shouldPlay: false });
+        // Switch audio session to playback mode before playing
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+          interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+          interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
+          staysActiveInBackground: false,
+        });
+        const { sound } = await Audio.Sound.createAsync(
+          { uri: tempFile },
+          { shouldPlay: true }  // play immediately on load
+        );
         await new Promise<void>((resolve) => {
           sound.setOnPlaybackStatusUpdate((status) => {
             if (!status.isLoaded) return;
-            if (status.didJustFinish || !status.isPlaying) {
+            if (status.didJustFinish) {  // only resolve when actually finished
               sound.setOnPlaybackStatusUpdate(null);
               resolve();
             }
           });
-          sound.playAsync();
         });
         await sound.unloadAsync();
       } catch (error) {
@@ -224,7 +236,32 @@ const IntercomScreen = () => {
       });
 
       const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.prepareToRecordAsync({
+        isMeteringEnabled: false,
+        android: {
+          extension: '.aac',
+          outputFormat: Audio.AndroidOutputFormat.AAC_ADTS,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 32000,
+        },
+        ios: {
+          extension: '.aac',
+          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+          audioQuality: Audio.IOSAudioQuality.MEDIUM,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 32000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: {
+          mimeType: 'audio/webm',
+          bitsPerSecond: 32000,
+        },
+      });
       await recording.startAsync();
       recordingRef.current = recording;
       setIsRecording(true);
@@ -271,6 +308,16 @@ const IntercomScreen = () => {
     } finally {
       recordingRef.current = null;
       setIsRecording(false);
+      // Restore audio session to playback mode so incoming audio can be heard
+      Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+        staysActiveInBackground: false,
+      }).catch(() => null);
       wsClient.send({ type: 'ptt_end' });
       if (userId) {
         setMembers((prev) => {
