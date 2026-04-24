@@ -4,7 +4,7 @@ import wsClient from './ws';
 
 export const FLOW_LOCATION_TASK = 'FLOW_LOCATION_TASK';
 
-TaskManager.defineTask(FLOW_LOCATION_TASK, ({ data, error }) => {
+TaskManager.defineTask(FLOW_LOCATION_TASK, async ({ data, error }) => {
   if (error) {
     console.error('[BgGPS] Task error:', error.message);
     return;
