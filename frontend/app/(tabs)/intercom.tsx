@@ -25,7 +25,7 @@ const IntercomScreen = () => {
   const [identity, setIdentity] = useState<Identity>({ userId: '', groupId: '', name: '' });
   const [members, setMembers] = useState<Record<string, MemberState>>({});
   const [activeSpeaker, setActiveSpeaker] = useState<MemberState | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error' | 'closed'>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'error' | 'closed'>(wsClient.getState());
   const [isRecording, setIsRecording] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
@@ -59,14 +59,6 @@ const IntercomScreen = () => {
       mounted = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (!userId || !groupId) return;
-    wsClient.connect(userId, groupId, displayName);
-    return () => {
-      wsClient.disconnect();
-    };
-  }, [userId, groupId, displayName]);
 
   useEffect(() => {
     if (!userId) return;

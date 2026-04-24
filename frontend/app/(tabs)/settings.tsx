@@ -178,8 +178,8 @@ const SettingsScreen = () => {
               } catch (error) {
                 console.warn('[settings] Stop BG GPS on leave failed:', error);
               }
-              await AsyncStorage.multiRemove(['groupId', 'token', 'userId', 'alwaysOn']);
-              router.replace('/');
+              await AsyncStorage.multiRemove(['groupId', 'alwaysOn']);
+              router.replace('/group-setup');
             } catch (error: any) {
               Alert.alert('Error', error?.message || 'Failed to leave group');
             } finally {
