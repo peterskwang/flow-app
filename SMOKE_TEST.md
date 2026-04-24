@@ -11,7 +11,11 @@ Argus gate: if a PR or release does not include a completed smoke test section �
 ### Intercom
 - [ ] Open Intercom tab → status shows **"Connected to group intercom"** within 5s (never stuck on "Connecting...")
 - [ ] PTT button is **enabled and tappable** (not greyed out)
-- [ ] Hold PTT on Phone A → Phone B hears voice audio within ~2s
+- [ ] Hold PTT on Phone A for ~1s (short) → **Phone B hears audio clearly** within ~2s
+- [ ] Hold PTT on Phone A for ~5s (long message) → Phone B hears full audio, not cut off
+- [ ] Phone B speaks back → Phone A hears it (bidirectional, both directions must work)
+- [ ] iOS → Android: Phone A (iOS) speaks → Phone B (Android) hears it
+- [ ] Android → iOS: Phone A (Android) speaks → Phone B (iOS) hears it
 - [ ] Release PTT → channel shows clear, "Now Talking" resets
 
 ### iPod / AirPod
@@ -41,6 +45,7 @@ Argus gate: if a PR or release does not include a completed smoke test section �
 - [ ] Fresh install (no cached data) → no crash on first launch
 - [ ] AirPods connected → intercom audio routes through earphones correctly
 - [ ] Two-phone full round-trip: both users can PTT and hear each other bidirectionally
+- [ ] Audio quality acceptable at both short (~1s) and long (~10s) message durations
 
 ---
 
