@@ -361,8 +361,14 @@ const MainModeScreen = ({ onBack }: { onBack: () => void }) => {
   const [rssi, setRssi] = useState<number | null>(null);
   const pcRef = useRef<any>(null);
   const wsGroupIdRef = useRef<string>('');
+  const gogglesIdRef = useRef<string>('');
   const webrtcReconnectAttemptsRef = useRef(0);
   const MAX_WEBRTC_RECONNECTS = 3;
+
+  // Keep gogglesIdRef in sync so WS listener always reads the latest gogglesId
+  useEffect(() => {
+    gogglesIdRef.current = gogglesId;
+  }, [gogglesId]);
 
   const teardown = useCallback(async () => {
     stopGogglesStream(pcRef.current);
@@ -431,15 +437,17 @@ const MainModeScreen = ({ onBack }: { onBack: () => void }) => {
         }
       });
 
-      // WS listener for goggle signaling
+      // WS listener for goggle signaling — use gogglesIdRef.current (not the
+      // closed-over gogglesId state) so the handler always sees the latest value
+      // after BLE pairing updates it.
       removeWsListener = wsClient.onGoggleSignal((msg: any) => {
-        if (msg.type === 'goggle_ready' && msg.gogglesId === gogglesId) {
+        if (msg.type === 'goggle_ready' && msg.gogglesId === gogglesIdRef.current) {
           setStatus('connected');
         }
-        if (msg.type === 'goggle_offer' && msg.gogglesId === gogglesId) {
+        if (msg.type === 'goggle_offer' && msg.gogglesId === gogglesIdRef.current) {
           startWebRtcFlow(msg.gogglesId, { type: 'offer', sdp: msg.sdp });
         }
-        if (msg.type === 'goggle_disconnect' && msg.gogglesId === gogglesId) {
+        if (msg.type === 'goggle_disconnect' && msg.gogglesId === gogglesIdRef.current) {
           setStatus('idle');
           setRemoteStream(null);
           pcRef.current && stopGogglesStream(pcRef.current);

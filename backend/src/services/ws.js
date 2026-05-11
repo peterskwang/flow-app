@@ -12,6 +12,8 @@ const speakerSeq = new Map();
 const goggleSockets = new Map();
 // gogglesId → ws (central-mode socket awaiting goggle)
 const centralSockets = new Map();
+// gogglesId → userId that registered this goggle (ownership map)
+const gogglesOwners = new Map();
 
 async function ensureUserAllowed(userId) {
   if (!userId) {
@@ -206,9 +208,15 @@ async function handleMessage(ws, msg) {
     }
 
     case 'goggle_register': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
       ws.gogglesId = msg.gogglesId;
       ws.goggleMode = true;
       goggleSockets.set(msg.gogglesId, ws);
+      gogglesOwners.set(msg.gogglesId, ws.userId);
       // Notify waiting central if present
       const centralForReg = centralSockets.get(msg.gogglesId);
       if (centralForReg?.readyState === 1) {
@@ -219,6 +227,15 @@ async function handleMessage(ws, msg) {
     }
 
     case 'goggle_offer': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      if (gogglesOwners.get(msg.gogglesId) !== ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'forbidden' }));
+        return;
+      }
       const centralForOffer = centralSockets.get(msg.gogglesId);
       if (centralForOffer?.readyState === 1) {
         centralForOffer.send(JSON.stringify({ type: 'goggle_offer', gogglesId: msg.gogglesId, sdp: msg.sdp }));
@@ -227,6 +244,15 @@ async function handleMessage(ws, msg) {
     }
 
     case 'goggle_answer': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      if (gogglesOwners.has(msg.gogglesId) && gogglesOwners.get(msg.gogglesId) !== ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'forbidden' }));
+        return;
+      }
       const goggleForAnswer = goggleSockets.get(msg.gogglesId);
       if (goggleForAnswer?.readyState === 1) {
         goggleForAnswer.send(JSON.stringify({ type: 'goggle_answer', gogglesId: msg.gogglesId, sdp: msg.sdp }));
@@ -235,6 +261,11 @@ async function handleMessage(ws, msg) {
     }
 
     case 'goggle_ice': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
       const iceTarget = msg.from === 'goggle'
         ? centralSockets.get(msg.gogglesId)
         : goggleSockets.get(msg.gogglesId);
@@ -245,6 +276,15 @@ async function handleMessage(ws, msg) {
     }
 
     case 'goggle_command': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      if (gogglesOwners.has(msg.gogglesId) && gogglesOwners.get(msg.gogglesId) !== ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'forbidden' }));
+        return;
+      }
       const goggleForCmd = goggleSockets.get(msg.gogglesId);
       if (goggleForCmd?.readyState === 1) {
         goggleForCmd.send(JSON.stringify({ type: 'goggle_command', cmd: msg.cmd }));
@@ -253,6 +293,11 @@ async function handleMessage(ws, msg) {
     }
 
     case 'goggle_await': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
       // Central registers it is waiting for a specific goggle
       ws.awaitingGoggle = msg.gogglesId;
       centralSockets.set(msg.gogglesId, ws);
@@ -265,6 +310,11 @@ async function handleMessage(ws, msg) {
     }
 
     case 'goggle_disconnect': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
       const goggleForDisc = goggleSockets.get(msg.gogglesId);
       const centralForDisc = centralSockets.get(msg.gogglesId);
       if (goggleForDisc?.readyState === 1) {
@@ -275,6 +325,7 @@ async function handleMessage(ws, msg) {
       }
       goggleSockets.delete(msg.gogglesId);
       centralSockets.delete(msg.gogglesId);
+      gogglesOwners.delete(msg.gogglesId);
       break;
     }
 

@@ -472,6 +472,10 @@ class WooverseGoggleBridge {
     this.connectedGoggle = device;
     this.connectedGoggleBle = connected;
     this._subscribeToGoggleTx();
+    // Register disconnect listener so BLE drops trigger the reconnect back-off
+    connected.onDisconnected((_error, disconnectedDevice) => {
+      this.handleGoggleDisconnect(disconnectedDevice.id);
+    });
   }
 
   private _subscribeToGoggleTx() {
@@ -567,7 +571,7 @@ class WooverseGoggleBridge {
   }
 
   /** Call this when a BLE disconnect is detected while auto-reconnect is enabled */
-  handleGoggleDisconnect(): void {
+  handleGoggleDisconnect(_gogglesId?: string): void {
     if (!this.autoReconnectEnabled || !this.reconnectGogglesId) return;
     if (this.reconnectAttempts >= GOGGLE_MAX_RECONNECT_ATTEMPTS) {
       console.warn('[GoggleBLE] Max reconnect attempts reached — giving up');
