@@ -7,30 +7,31 @@ import { v4 as uuidv4 } from 'uuid';
 
 import wsClient from './ws';
 
-const FLOW_SERVICE_UUID = '6E400001-B5A3-F393-E0A9-E50E24DCCA9E';
-const FLOW_RX_CHAR_UUID = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E';
-const FLOW_TX_CHAR_UUID = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E';
-const STORAGE_KEY = 'flowBlePairedDevice';
+const WOOVERSE_SERVICE_UUID = '6E400001-B5A3-F393-E0A9-E50E24DCCA9E';
+const WOOVERSE_RX_CHAR_UUID = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E';
+const WOOVERSE_TX_CHAR_UUID = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E';
+const STORAGE_KEY = 'wooverseBleDevice';
+const LEGACY_STORAGE_KEY = 'flowBlePairedDevice';
 
-export interface FlowBleDevice {
+export interface WooverseDevice {
   id: string;
   name: string;
   rssi?: number | null;
   simulated?: boolean;
 }
 
-interface FlowBleStatus {
-  pairedDevice: FlowBleDevice | null;
+interface WooverseStatus {
+  pairedDevice: WooverseDevice | null;
   connected: boolean;
 }
 
 interface SimulationState {
-  device: FlowBleDevice | null;
+  device: WooverseDevice | null;
   advertising: boolean;
   paired: boolean;
 }
 
-type StateListener = (status: FlowBleStatus) => void;
+type StateListener = (status: WooverseStatus) => void;
 type SimulationListener = (state: SimulationState) => void;
 type AudioListener = (chunk: string) => void;
 
@@ -62,7 +63,7 @@ function emitFromSimulatedPeripheral(chunk: string) {
 async function playBase64Chunk(base64: string) {
   if (!base64) return;
   const cacheDir = FileSystem.cacheDirectory ?? '';
-  const file = `${cacheDir}flow-ble-${Date.now()}-${Math.random().toString(36).slice(2)}.aac`;
+  const file = `${cacheDir}wooverse-ble-${Date.now()}-${Math.random().toString(36).slice(2)}.aac`;
   try {
     await FileSystem.writeAsStringAsync(file, base64, {
       encoding: FileSystem.EncodingType.Base64,
@@ -85,9 +86,9 @@ async function playBase64Chunk(base64: string) {
   }
 }
 
-class FlowBleBridge {
+class WooverseBleBridge {
   private manager: NullableBleManager;
-  private pairedDevice: FlowBleDevice | null = null;
+  private pairedDevice: WooverseDevice | null = null;
   private connectedDevice: Device | null = null;
   private txSubscription: { remove: () => void } | null = null;
   private listeners = new Set<StateListener>();
@@ -111,7 +112,16 @@ class FlowBleBridge {
 
   private async bootstrap() {
     try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      let raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        // Migrate from legacy key
+        const legacyRaw = await AsyncStorage.getItem(LEGACY_STORAGE_KEY);
+        if (legacyRaw) {
+          await AsyncStorage.setItem(STORAGE_KEY, legacyRaw);
+          await AsyncStorage.removeItem(LEGACY_STORAGE_KEY);
+          raw = legacyRaw;
+        }
+      }
       if (raw) {
         this.pairedDevice = JSON.parse(raw);
       }
@@ -135,7 +145,7 @@ class FlowBleBridge {
     this.listeners.forEach((listener) => listener(snapshot));
   }
 
-  getStatus(): FlowBleStatus {
+  getStatus(): WooverseStatus {
     const connected = Boolean(
       (this.pairedDevice && this.connectedDevice) ||
         (this.pairedDevice?.simulated && simulationState.paired)
@@ -143,16 +153,16 @@ class FlowBleBridge {
     return { pairedDevice: this.pairedDevice, connected };
   }
 
-  async scanForDevices(timeoutMs = 4000): Promise<FlowBleDevice[]> {
+  async scanForDevices(timeoutMs = 4000): Promise<WooverseDevice[]> {
     if (!this.manager) {
       return simulationState.advertising && simulationState.device
         ? [{ ...simulationState.device }]
         : [];
     }
-    const found: Record<string, FlowBleDevice> = {};
+    const found: Record<string, WooverseDevice> = {};
     return new Promise((resolve) => {
       try {
-        this.manager!.startDeviceScan([FLOW_SERVICE_UUID], null, (error, device) => {
+        this.manager!.startDeviceScan([WOOVERSE_SERVICE_UUID], null, (error, device) => {
           if (error) {
             console.warn('[BLE] scan error', error);
             return;
@@ -160,7 +170,7 @@ class FlowBleBridge {
           if (device) {
             found[device.id] = {
               id: device.id,
-              name: device.name || 'FLOW Device',
+              name: device.name || 'Wooverse Device',
               rssi: device.rssi ?? null,
             };
           }
@@ -179,7 +189,7 @@ class FlowBleBridge {
     });
   }
 
-  async connectToDevice(device: FlowBleDevice) {
+  async connectToDevice(device: WooverseDevice) {
     if (device.simulated) {
       this.pairedDevice = device;
       updateSimulationState({ paired: true, advertising: false, device });
@@ -206,8 +216,8 @@ class FlowBleBridge {
     if (!this.connectedDevice || !this.manager) return;
     this.txSubscription?.remove?.();
     this.txSubscription = this.connectedDevice.monitorCharacteristicForService(
-      FLOW_SERVICE_UUID,
-      FLOW_TX_CHAR_UUID,
+      WOOVERSE_SERVICE_UUID,
+      WOOVERSE_TX_CHAR_UUID,
       (error, characteristic) => {
         if (error) {
           console.warn('[BLE] monitor error', error);
@@ -231,8 +241,8 @@ class FlowBleBridge {
     this.manager
       .writeCharacteristicWithoutResponseForDevice(
         this.connectedDevice.id,
-        FLOW_SERVICE_UUID,
-        FLOW_RX_CHAR_UUID,
+        WOOVERSE_SERVICE_UUID,
+        WOOVERSE_RX_CHAR_UUID,
         base64
       )
       .catch((error) => console.warn('[BLE] write failed', error));
@@ -265,7 +275,7 @@ class FlowBleBridge {
   }
 }
 
-class FlowBleSimulator {
+class WooverseSimulator {
   onStateChange(listener: SimulationListener) {
     simulationListeners.add(listener);
     listener({ ...simulationState });
@@ -277,8 +287,8 @@ class FlowBleSimulator {
     return () => simulationDownlinkListeners.delete(listener);
   }
 
-  startAdvertising(name = 'FLOW iPod') {
-    const device: FlowBleDevice = {
+  startAdvertising(name = 'Wooverse iPod') {
+    const device: WooverseDevice = {
       id: simulationState.device?.id || `sim-${uuidv4()}`,
       name,
       simulated: true,
@@ -309,8 +319,8 @@ class FlowBleSimulator {
   }
 }
 
-const bleBridge = new FlowBleBridge();
-const bleSimulator = new FlowBleSimulator();
+const bleBridge = new WooverseBleBridge();
+const bleSimulator = new WooverseSimulator();
 
-export { FLOW_SERVICE_UUID, bleSimulator };
+export { WOOVERSE_SERVICE_UUID, bleSimulator };
 export default bleBridge;

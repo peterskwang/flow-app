@@ -19,7 +19,7 @@ app.use(express.json());
 
 // Health check — no auth required
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', project: 'flow-app', version: '0.1.0' });
+  res.json({ status: 'ok', project: 'wooverse', version: '1.0.0' });
 });
 
 // Routes
@@ -34,8 +34,8 @@ setupWebSocket(server);
 
 const PORT = process.env.PORT || 8100;
 server.listen(PORT, () => {
-  console.log(`[FLOW] Backend running on port ${PORT}`);
-  console.log(`[FLOW] WebSocket on same port (ws://localhost:${PORT}/ws)`);
+  console.log(`[Wooverse] Backend running on port ${PORT}`);
+  console.log(`[Wooverse] WebSocket on same port (ws://localhost:${PORT}/ws)`);
 });
 
 module.exports = { app, server };

@@ -1,21 +1,21 @@
 {
   "expo": {
-    "name": "FLOW",
-    "slug": "flow-app",
+    "name": "Wooverse",
+    "slug": "wooverse",
     "version": "1.0.0",
-    "scheme": "flow",
+    "scheme": "wooverse",
     "orientation": "portrait",
     "platforms": ["ios", "android"],
     "userInterfaceStyle": "dark",
     "android": {
-      "package": "com.apex.flow"
+      "package": "com.wooverse.app"
     },
     "ios": {
-      "bundleIdentifier": "com.apex.flow",
+      "bundleIdentifier": "com.wooverse.app",
       "supportsTablet": false,
       "infoPlist": {
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "FLOW uses your location to show your position on the ski map and share it with your group even when the app is in the background.",
-        "NSLocationAlwaysUsageDescription": "FLOW needs Always location access to track your position while skiing with the app in the background.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Wooverse uses your location to show your position on the map and share it with your group even when the app is in the background.",
+        "NSLocationAlwaysUsageDescription": "Wooverse needs Always location access to track your position while the app is in the background.",
         "UIBackgroundModes": ["location", "fetch"]
       }
     },
@@ -24,8 +24,8 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "FLOW needs location to show your position on the ski map.",
-          "locationAlwaysPermission": "FLOW uses background location to share your position with your ski group while the app is in the background.",
+          "locationAlwaysAndWhenInUsePermission": "Wooverse needs location to show your position on the map.",
+          "locationAlwaysPermission": "Wooverse uses background location to share your position with your group while the app is in the background.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true
         }
@@ -37,7 +37,8 @@
           "sounds": []
         }
       ],
-      "expo-task-manager"
+      "expo-task-manager",
+      "expo-apple-authentication"
     ]
   }
 }

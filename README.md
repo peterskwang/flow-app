@@ -1,8 +1,8 @@
-# FLOW App
+# Wooverse
 
-> Ski app connecting to FLOW smart goggles — group intercom, live GPS map, and SOS alerts.
+> Ski app connecting to Wooverse smart goggles — group intercom, live GPS map, and SOS alerts.
 
-**Repo:** https://github.com/peterskwang/flow-app  
+**Repo:** https://github.com/peterskwang/wooverse  
 **Stack:** Expo (React Native) · Node.js · PostgreSQL · Next.js admin  
 **Status:** Phase 4 complete ✅
 
@@ -20,7 +20,7 @@
 | SOS alert — broadcasts to group + push notification | ✅ |
 | Background GPS (always-on mode) | ✅ |
 | Push notifications (Expo Push API) | ✅ |
-| BLE audio bridge (FLOW goggles integration) | ✅ |
+| BLE audio bridge (Wooverse goggles integration) | ✅ |
 | iPod simulator tab (test BLE without hardware) | ✅ |
 | Admin panel (Next.js) — users, groups, SOS log | ✅ |
 
@@ -29,7 +29,7 @@
 ## Architecture
 
 ```
-/opt/flow-app/
+/opt/wooverse/
 ├── backend/          Node.js + Express + WebSocket (port 8100)
 ├── frontend/         Expo React Native app (iOS + Android)
 ├── admin/            Next.js admin dashboard (port 8101)
@@ -37,7 +37,7 @@
 └── docs/             Testing manuals + Argus review notes
 ```
 
-**Database:** PostgreSQL — isolated `flow_app` DB, separate from all other projects.
+**Database:** PostgreSQL — isolated `wooverse` DB, separate from all other projects.
 
 ---
 
@@ -54,8 +54,8 @@
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/peterskwang/flow-app.git
-cd flow-app
+git clone https://github.com/peterskwang/wooverse.git
+cd wooverse
 ```
 
 ---
@@ -64,13 +64,13 @@ cd flow-app
 
 ```bash
 # Create DB + user
-psql -U postgres -c "CREATE USER flow_user WITH PASSWORD 'yourpassword';"
-psql -U postgres -c "CREATE DATABASE flow_app OWNER flow_user;"
+psql -U postgres -c "CREATE USER wooverse_user WITH PASSWORD 'yourpassword';"
+psql -U postgres -c "CREATE DATABASE wooverse OWNER wooverse_user;"
 
 # Run migrations in order
-psql -U flow_user -d flow_app -f backend/migrations/001_initial.sql
-psql -U flow_user -d flow_app -f backend/migrations/002_phase3.sql
-psql -U flow_user -d flow_app -f backend/migrations/003_push_tokens.sql
+psql -U wooverse_user -d wooverse -f backend/migrations/001_initial.sql
+psql -U wooverse_user -d wooverse -f backend/migrations/002_phase3.sql
+psql -U wooverse_user -d wooverse -f backend/migrations/003_push_tokens.sql
 ```
 
 ---
@@ -90,7 +90,7 @@ npm run dev
 # → WebSocket on ws://localhost:8100/ws
 ```
 
-**Verify:** `curl http://localhost:8100/health` → `{"status":"ok","project":"flow-app"}`
+**Verify:** `curl http://localhost:8100/health` → `{"status":"ok","project":"wooverse"}`
 
 ---
 
@@ -141,8 +141,8 @@ NODE_ENV=development
 # PostgreSQL
 DB_HOST=localhost
 DB_PORT=5432
-DB_NAME=flow_app
-DB_USER=flow_user
+DB_NAME=wooverse
+DB_USER=wooverse_user
 DB_PASS=yourpassword
 
 # JWT — use a long random string
@@ -269,19 +269,19 @@ The app is deployed on a VPS at `5.223.73.76` and managed with PM2:
 
 ```bash
 pm2 list
-# flow-backend    port 8100   ← API + WebSocket
-# flow-frontend               ← Expo dev server
-# flow-admin      port 8101   ← Admin panel
+# wooverse-backend    port 8100   ← API + WebSocket
+# wooverse-frontend               ← Expo dev server
+# wooverse-admin      port 8101   ← Admin panel
 ```
 
 To deploy an update:
 ```bash
-cd /opt/flow-app
+cd /opt/wooverse
 git pull origin main
 cd backend && npm install
-pm2 restart flow-backend
+pm2 restart wooverse-backend
 cd ../admin && npm install && npm run build
-pm2 restart flow-admin
+pm2 restart wooverse-admin
 ```
 
 ---
@@ -292,16 +292,16 @@ pm2 restart flow-admin
 - [ ] Real BLE pairing requires native build (not Expo Go)
 - [ ] WS auto-reconnect on network drop
 - [ ] SOS resolve flow visible to users (currently admin-only)
-- [ ] HTTPS / custom domain for `flow.peterskwang.com`
+- [ ] HTTPS / custom domain for `wooverse.peterskwang.com`
 
 ---
 
 ## GitHub Issues
 
-All features tracked at: https://github.com/peterskwang/flow-app/issues
+All features tracked at: https://github.com/peterskwang/wooverse/issues
 
 Phase milestones:
-- [Phase 1 — Foundation](https://github.com/peterskwang/flow-app/issues/2)
-- [Phase 2 — Core Features](https://github.com/peterskwang/flow-app/issues/3)
-- [Phase 3 — Safety + BLE](https://github.com/peterskwang/flow-app/issues/4)
+- [Phase 1 — Foundation](https://github.com/peterskwang/wooverse/issues/2)
+- [Phase 2 — Core Features](https://github.com/peterskwang/wooverse/issues/3)
+- [Phase 3 — Safety + BLE](https://github.com/peterskwang/wooverse/issues/4)
 - Phase 4 — Group UI (#14), Push Notifications (#13), Background GPS (#15), Admin Panel (#16)

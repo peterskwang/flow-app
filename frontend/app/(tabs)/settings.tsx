@@ -18,7 +18,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 
 import api from '../services/api';
-import bleBridge, { FlowBleDevice } from '../services/ble';
+import bleBridge, { WooverseDevice } from '../services/ble';
 import {
   isBackgroundLocationRunning,
   startBackgroundLocationTask,
@@ -34,10 +34,10 @@ const SettingsScreen = () => {
   const [saving, setSaving] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [pairedDevice, setPairedDevice] = useState<FlowBleDevice | null>(null);
+  const [pairedDevice, setPairedDevice] = useState<WooverseDevice | null>(null);
   const [bleConnected, setBleConnected] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [scanResults, setScanResults] = useState<FlowBleDevice[]>([]);
+  const [scanResults, setScanResults] = useState<WooverseDevice[]>([]);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [pairError, setPairError] = useState<string | null>(null);
   const [currentGroup, setCurrentGroup] = useState<{ name: string; invite_code: string } | null>(null);
@@ -101,17 +101,13 @@ const SettingsScreen = () => {
     try {
       setSaving(true);
       setSaveSuccess(false);
-      const deviceId = await AsyncStorage.getItem('deviceId');
-      await api.post('/api/auth/register', {
-        display_name: trimmed,
-        device_id: deviceId
-      });
+      await api.patch('/api/auth/users/me', { name: trimmed });
       await AsyncStorage.setItem('displayName', trimmed);
       setDisplayName(trimmed);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch (error: any) {
-      Alert.alert('Failed to save', error?.response?.data?.message || error?.message || 'Server error');
+      Alert.alert('Failed to save', error?.response?.data?.error || error?.message || 'Server error');
     } finally {
       setSaving(false);
     }
@@ -130,7 +126,7 @@ const SettingsScreen = () => {
         if (bgStatus !== 'granted') {
           Alert.alert(
             'Background Permission Denied',
-            'FLOW needs "Always" location access for Always-On Mode. Enable it in Settings > FLOW > Location > Always.'
+            'Wooverse needs "Always" location access for Always-On Mode. Enable it in Settings > Wooverse > Location > Always.'
           );
           return;
         }
@@ -198,7 +194,7 @@ const SettingsScreen = () => {
       const devices = await bleBridge.scanForDevices(5000);
       setScanResults(devices);
       if (!devices.length) {
-        setPairError('No FLOW devices found nearby.');
+        setPairError('No Wooverse devices found nearby.');
       }
     } catch (error: any) {
       setPairError(error?.message || 'Scan failed');
@@ -207,7 +203,7 @@ const SettingsScreen = () => {
     }
   }, []);
 
-  const handleConnectDevice = useCallback(async (device: FlowBleDevice) => {
+  const handleConnectDevice = useCallback(async (device: WooverseDevice) => {
     setConnectingId(device.id);
     setPairError(null);
     try {
@@ -240,9 +236,32 @@ const SettingsScreen = () => {
   const handleShareGroupCode = useCallback(async () => {
     if (!currentGroup) return;
     await Share.share({
-      message: `Join my FLOW ski group "${currentGroup.name}" with code: ${currentGroup.invite_code}`
+      message: `Join my Wooverse group "${currentGroup.name}" with code: ${currentGroup.invite_code}`
     });
   }, [currentGroup]);
+
+  const handleLogout = useCallback(() => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to log out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await stopBackgroundLocationTask().catch(() => null);
+              await AsyncStorage.multiRemove(['token', 'userId', 'groupId', 'displayName', 'email']);
+              router.replace('/login');
+            } catch (error: any) {
+              Alert.alert('Error', error?.message || 'Failed to logout');
+            }
+          }
+        }
+      ]
+    );
+  }, [router]);
 
   const nameChanged = editedName.trim() !== displayName;
   const appVersion = Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0';
@@ -319,7 +338,7 @@ const SettingsScreen = () => {
                 onPress={() => handleConnectDevice(device)}
               >
                 <View>
-                  <Text style={styles.deviceName}>{device.name || 'FLOW Device'}</Text>
+                  <Text style={styles.deviceName}>{device.name || 'Wooverse Device'}</Text>
                   {device.rssi != null ? (
                     <Text style={styles.deviceMeta}>Signal {device.rssi} dBm</Text>
                   ) : null}
@@ -383,7 +402,17 @@ const SettingsScreen = () => {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>About</Text>
-        <Text style={styles.versionText}>FLOW v{appVersion}</Text>
+        <Text style={styles.versionText}>Wooverse v{appVersion}</Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Account</Text>
+        <Pressable
+          onPress={handleLogout}
+          style={({ pressed }) => [styles.leaveButton, pressed && styles.leaveButtonPressed]}
+        >
+          <Text style={styles.leaveButtonText}>Logout</Text>
+        </Pressable>
       </View>
     </ScrollView>
   );

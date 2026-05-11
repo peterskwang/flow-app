@@ -33,7 +33,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-[#06121f] flex items-center justify-center">
       <div className="w-full max-w-sm bg-[#0d2034] rounded-2xl p-8 border border-[#1e3a5f]">
-        <h1 className="text-3xl font-black text-white text-center mb-2 tracking-wider">FLOW</h1>
+        <h1 className="text-3xl font-black text-white text-center mb-2 tracking-wider">Wooverse</h1>
         <p className="text-slate-400 text-center mb-8 text-sm">Admin Panel</p>
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
           <input
