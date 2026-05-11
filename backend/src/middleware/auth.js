@@ -14,7 +14,12 @@ async function requireAuth(req, res, next) {
     if (result.rows.length > 0 && result.rows[0].banned_at) {
       return res.status(403).json({ error: 'Account banned' });
     }
-    req.user = decoded;
+    req.user = {
+      userId: decoded.userId,
+      email: decoded.email || null,
+      appleSub: decoded.appleSub || null,
+      deviceId: decoded.deviceId || null
+    };
     next();
   } catch (e) {
     if (e.name === 'JsonWebTokenError' || e.name === 'TokenExpiredError') {

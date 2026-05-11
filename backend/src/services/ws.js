@@ -90,7 +90,7 @@ function setupWebSocket(server) {
     });
   });
 
-  console.log('[FLOW] WebSocket server ready');
+  console.log('[Wooverse] WebSocket server ready');
   return wss;
 }
 

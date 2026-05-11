@@ -25,7 +25,7 @@ export default function Layout({ children }: LayoutProps) {
     <div className="min-h-screen bg-[#06121f] text-slate-100">
       <nav className="bg-[#0d2034] border-b border-[#1e3a5f] px-6 py-4 flex items-center gap-6">
         <Link href="/users" className="font-black text-xl text-white tracking-wider hover:text-[#64ffda] transition-colors">
-          FLOW ADMIN
+          WOOVERSE ADMIN
         </Link>
         <div className="flex gap-4 flex-1">
           {NAV_LINKS.map((link) => (
