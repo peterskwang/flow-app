@@ -7,6 +7,13 @@ const rooms = new Map();
 const userSockets = new Map();
 // Per-user audio sequence numbers
 const speakerSeq = new Map();
+// Goggle simulator registries (ephemeral — in-memory only)
+// gogglesId → ws (goggle-mode socket)
+const goggleSockets = new Map();
+// gogglesId → ws (central-mode socket awaiting goggle)
+const centralSockets = new Map();
+// gogglesId → userId that registered this goggle (ownership map)
+const gogglesOwners = new Map();
 
 async function ensureUserAllowed(userId) {
   if (!userId) {
@@ -200,6 +207,128 @@ async function handleMessage(ws, msg) {
       break;
     }
 
+    case 'goggle_register': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      ws.gogglesId = msg.gogglesId;
+      ws.goggleMode = true;
+      goggleSockets.set(msg.gogglesId, ws);
+      gogglesOwners.set(msg.gogglesId, ws.userId);
+      // Notify waiting central if present
+      const centralForReg = centralSockets.get(msg.gogglesId);
+      if (centralForReg?.readyState === 1) {
+        centralForReg.send(JSON.stringify({ type: 'goggle_ready', gogglesId: msg.gogglesId }));
+      }
+      ws.send(JSON.stringify({ type: 'goggle_registered', gogglesId: msg.gogglesId }));
+      break;
+    }
+
+    case 'goggle_offer': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      if (gogglesOwners.get(msg.gogglesId) !== ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'forbidden' }));
+        return;
+      }
+      const centralForOffer = centralSockets.get(msg.gogglesId);
+      if (centralForOffer?.readyState === 1) {
+        centralForOffer.send(JSON.stringify({ type: 'goggle_offer', gogglesId: msg.gogglesId, sdp: msg.sdp }));
+      }
+      break;
+    }
+
+    case 'goggle_answer': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      if (gogglesOwners.has(msg.gogglesId) && gogglesOwners.get(msg.gogglesId) !== ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'forbidden' }));
+        return;
+      }
+      const goggleForAnswer = goggleSockets.get(msg.gogglesId);
+      if (goggleForAnswer?.readyState === 1) {
+        goggleForAnswer.send(JSON.stringify({ type: 'goggle_answer', gogglesId: msg.gogglesId, sdp: msg.sdp }));
+      }
+      break;
+    }
+
+    case 'goggle_ice': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      const iceTarget = msg.from === 'goggle'
+        ? centralSockets.get(msg.gogglesId)
+        : goggleSockets.get(msg.gogglesId);
+      if (iceTarget?.readyState === 1) {
+        iceTarget.send(JSON.stringify({ type: 'goggle_ice', candidate: msg.candidate, from: msg.from }));
+      }
+      break;
+    }
+
+    case 'goggle_command': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      if (gogglesOwners.has(msg.gogglesId) && gogglesOwners.get(msg.gogglesId) !== ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'forbidden' }));
+        return;
+      }
+      const goggleForCmd = goggleSockets.get(msg.gogglesId);
+      if (goggleForCmd?.readyState === 1) {
+        goggleForCmd.send(JSON.stringify({ type: 'goggle_command', cmd: msg.cmd }));
+      }
+      break;
+    }
+
+    case 'goggle_await': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      // Central registers it is waiting for a specific goggle
+      ws.awaitingGoggle = msg.gogglesId;
+      centralSockets.set(msg.gogglesId, ws);
+      // If goggle already registered, notify immediately
+      const goggleForAwait = goggleSockets.get(msg.gogglesId);
+      if (goggleForAwait?.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'goggle_ready', gogglesId: msg.gogglesId }));
+      }
+      break;
+    }
+
+    case 'goggle_disconnect': {
+      if (!ws.userId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'unauthorized' }));
+        ws.close(4001, 'unauthorized');
+        return;
+      }
+      const goggleForDisc = goggleSockets.get(msg.gogglesId);
+      const centralForDisc = centralSockets.get(msg.gogglesId);
+      if (goggleForDisc?.readyState === 1) {
+        goggleForDisc.send(JSON.stringify({ type: 'goggle_disconnect', gogglesId: msg.gogglesId }));
+      }
+      if (centralForDisc?.readyState === 1) {
+        centralForDisc.send(JSON.stringify({ type: 'goggle_disconnect', gogglesId: msg.gogglesId }));
+      }
+      goggleSockets.delete(msg.gogglesId);
+      centralSockets.delete(msg.gogglesId);
+      gogglesOwners.delete(msg.gogglesId);
+      break;
+    }
+
     default:
       ws.send(JSON.stringify({ type: 'error', message: `Unknown type: ${msg.type}` }));
   }
@@ -221,6 +350,21 @@ function handleDisconnect(ws) {
       userId: ws.userId,
       name: ws.name,
     });
+  }
+  // Clean up goggle/central registries
+  if (ws.gogglesId && ws.goggleMode) {
+    goggleSockets.delete(ws.gogglesId);
+    const central = centralSockets.get(ws.gogglesId);
+    if (central?.readyState === 1) {
+      central.send(JSON.stringify({ type: 'goggle_disconnect', gogglesId: ws.gogglesId }));
+    }
+  }
+  if (ws.awaitingGoggle) {
+    centralSockets.delete(ws.awaitingGoggle);
+    const goggle = goggleSockets.get(ws.awaitingGoggle);
+    if (goggle?.readyState === 1) {
+      goggle.send(JSON.stringify({ type: 'goggle_disconnect', gogglesId: ws.awaitingGoggle }));
+    }
   }
 }
 

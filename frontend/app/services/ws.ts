@@ -125,6 +125,20 @@ class FlowWebSocket {
     return this.socket?.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * Subscribe to any WS message whose type starts with 'goggle_'.
+   * Returns an unsubscribe function.
+   */
+  onGoggleSignal(handler: (msg: any) => void): () => void {
+    const listener = (data: any) => {
+      if (typeof data?.type === 'string' && data.type.startsWith('goggle_')) {
+        handler(data);
+      }
+    };
+    this.on('message', listener);
+    return () => this.off('message', listener);
+  }
+
   on(event: string, listener: Listener) {
     if (!this.listeners[event]) {
       this.listeners[event] = new Set();

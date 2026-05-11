@@ -13,6 +13,16 @@ const WOOVERSE_TX_CHAR_UUID = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E';
 const STORAGE_KEY = 'wooverseBleDevice';
 const LEGACY_STORAGE_KEY = 'flowBlePairedDevice';
 
+// ---------------------------------------------------------------------------
+// Goggle Simulator BLE Service UUIDs (separate from iPod/NUS service)
+// ---------------------------------------------------------------------------
+export const GOGGLE_SERVICE_UUID = 'GOGGLE01-B5A3-F393-E0A9-E50E24DCCA9E';
+export const GOGGLE_RX_CHAR_UUID = 'GOGGLE02-B5A3-F393-E0A9-E50E24DCCA9E'; // Central → Goggle commands
+export const GOGGLE_TX_CHAR_UUID = 'GOGGLE03-B5A3-F393-E0A9-E50E24DCCA9E'; // Goggle → Central telemetry
+
+export type GoggleCommand = 'start_stream' | 'stop_stream' | 'capture_photo' | 'battery_level_req';
+export type GoggleTelemetryEvent = Record<string, unknown>;
+
 export interface WooverseDevice {
   id: string;
   name: string;
@@ -321,6 +331,283 @@ class WooverseSimulator {
 
 const bleBridge = new WooverseBleBridge();
 const bleSimulator = new WooverseSimulator();
+
+// ---------------------------------------------------------------------------
+// WooverseGoggleBridge
+// ---------------------------------------------------------------------------
+// Handles BLE peripheral advertising (Goggle Mode via react-native-ble-advertiser)
+// and BLE central scanning/connecting (Main Mode via react-native-ble-plx).
+// Real cross-device BLE is only available on physical iOS devices.
+// Simulation fallback is provided for same-device development.
+// ---------------------------------------------------------------------------
+
+type CommandListener = (cmd: GoggleTelemetryEvent) => void;
+type TelemetryListener = (evt: GoggleTelemetryEvent) => void;
+
+const GOGGLE_RECONNECT_BASE_DELAY = 1000;
+const GOGGLE_RECONNECT_MAX_DELAY = 30000;
+const GOGGLE_MAX_RECONNECT_ATTEMPTS = 5;
+
+class WooverseGoggleBridge {
+  private commandListeners = new Set<CommandListener>();
+  private telemetryListeners = new Set<TelemetryListener>();
+  private connectedGoggle: WooverseDevice | null = null;
+  private connectedGoggleBle: Device | null = null;
+  private goggleTxSubscription: { remove: () => void } | null = null;
+  private peripheralActive = false;
+  private autoReconnectEnabled = false;
+  private reconnectGogglesId: string | null = null;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private manager: NullableBleManager;
+
+  constructor() {
+    try {
+      this.manager = Platform.OS === 'web' ? null : new BleManager();
+    } catch {
+      console.warn('[GoggleBLE] Native BLE manager unavailable — simulation mode only');
+      this.manager = null;
+    }
+  }
+
+  // ---------- Goggle Mode (peripheral side) ----------
+
+  /**
+   * Start BLE advertising so the main iPhone can discover this device.
+   * Uses react-native-ble-advertiser on physical iOS devices.
+   * Falls back to a no-op simulation stub when native module is absent.
+   */
+  async startPeripheral(gogglesId: string): Promise<void> {
+    if (this.peripheralActive) return;
+    this.peripheralActive = true;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const BLEAdvertiser = require('react-native-ble-advertiser').default;
+      // Advertise with the GOGGLE_SERVICE_UUID so the main iPhone BLE scan picks it up
+      await BLEAdvertiser.broadcast(
+        GOGGLE_SERVICE_UUID,
+        [GOGGLE_RX_CHAR_UUID, GOGGLE_TX_CHAR_UUID],
+        { advertiseMode: 0, txPowerLevel: 3, connectable: true, includeDeviceName: true }
+      );
+      console.log('[GoggleBLE] Peripheral advertising started, gogglesId:', gogglesId);
+    } catch (err) {
+      console.warn('[GoggleBLE] BLE advertiser unavailable (native module missing or simulator):', err);
+      // Simulation path: emit an in-memory advertising state
+    }
+  }
+
+  stopPeripheral(): void {
+    if (!this.peripheralActive) return;
+    this.peripheralActive = false;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const BLEAdvertiser = require('react-native-ble-advertiser').default;
+      BLEAdvertiser.stopBroadcast();
+    } catch (err) {
+      console.warn('[GoggleBLE] stopBroadcast error:', err);
+    }
+  }
+
+  /** Goggle Mode: send telemetry notification to paired central */
+  sendTelemetry(evt: GoggleTelemetryEvent): void {
+    if (!this.manager || !this.connectedGoggleBle) {
+      // Simulation: broadcast to in-process telemetry listeners
+      this.telemetryListeners.forEach((l) => l(evt));
+      return;
+    }
+    const json = JSON.stringify(evt);
+    // Encode to base64 for BLE characteristic write
+    const b64 = btoa(unescape(encodeURIComponent(json)));
+    this.manager
+      .writeCharacteristicWithoutResponseForDevice(
+        this.connectedGoggleBle.id,
+        GOGGLE_SERVICE_UUID,
+        GOGGLE_TX_CHAR_UUID,
+        b64
+      )
+      .catch((err: Error) => console.warn('[GoggleBLE] sendTelemetry error:', err));
+  }
+
+  // ---------- Main Mode (central side) ----------
+
+  /**
+   * Scan BLE for devices advertising GOGGLE_SERVICE_UUID.
+   * Returns the first device found or null on timeout.
+   */
+  async scanForGoggle(timeoutMs = 8000): Promise<WooverseDevice | null> {
+    if (!this.manager) {
+      // Simulation: no real BLE scan
+      console.warn('[GoggleBLE] BLE manager unavailable — cannot scan for goggle in this environment');
+      return null;
+    }
+    return new Promise((resolve) => {
+      let found: WooverseDevice | null = null;
+      try {
+        this.manager!.startDeviceScan([GOGGLE_SERVICE_UUID], null, (error, device) => {
+          if (error) {
+            console.warn('[GoggleBLE] scan error:', error);
+            return;
+          }
+          if (device && !found) {
+            found = { id: device.id, name: device.name || 'WOOVERSE-GOGGLE', rssi: device.rssi ?? null };
+            this.manager!.stopDeviceScan();
+            resolve(found);
+          }
+        });
+      } catch (err) {
+        console.warn('[GoggleBLE] unable to start scan:', err);
+      }
+      setTimeout(() => {
+        this.manager!.stopDeviceScan();
+        if (!found) resolve(null);
+      }, timeoutMs);
+    });
+  }
+
+  /** Main Mode: connect to a discovered goggle device and subscribe to telemetry */
+  async connectToGoggle(device: WooverseDevice): Promise<void> {
+    if (!this.manager) throw new Error('[GoggleBLE] BLE not available');
+    const connected = await this.manager.connectToDevice(device.id, { autoConnect: true });
+    await connected.discoverAllServicesAndCharacteristics();
+    this.connectedGoggle = device;
+    this.connectedGoggleBle = connected;
+    this._subscribeToGoggleTx();
+    // Register disconnect listener so BLE drops trigger the reconnect back-off
+    connected.onDisconnected((_error, disconnectedDevice) => {
+      this.handleGoggleDisconnect(disconnectedDevice.id);
+    });
+  }
+
+  private _subscribeToGoggleTx() {
+    if (!this.manager || !this.connectedGoggleBle) return;
+    this.goggleTxSubscription?.remove();
+    this.goggleTxSubscription = this.connectedGoggleBle.monitorCharacteristicForService(
+      GOGGLE_SERVICE_UUID,
+      GOGGLE_TX_CHAR_UUID,
+      (error, characteristic) => {
+        if (error) {
+          console.warn('[GoggleBLE] TX monitor error:', error);
+          return;
+        }
+        const raw = characteristic?.value;
+        if (!raw) return;
+        try {
+          const json = decodeURIComponent(escape(atob(raw)));
+          const evt = JSON.parse(json) as GoggleTelemetryEvent;
+          this.telemetryListeners.forEach((l) => l(evt));
+        } catch (parseErr) {
+          console.warn('[GoggleBLE] failed to parse telemetry:', parseErr);
+        }
+      }
+    );
+  }
+
+  /** Main Mode: send BLE command to the connected goggle */
+  sendCommand(cmd: GoggleCommand): void {
+    const payload = JSON.stringify({ cmd });
+    const b64 = btoa(unescape(encodeURIComponent(payload)));
+    if (!this.manager || !this.connectedGoggleBle) {
+      // Simulation: route to in-process command listeners
+      this.commandListeners.forEach((l) => l({ cmd }));
+      return;
+    }
+    this.manager
+      .writeCharacteristicWithoutResponseForDevice(
+        this.connectedGoggleBle.id,
+        GOGGLE_SERVICE_UUID,
+        GOGGLE_RX_CHAR_UUID,
+        b64
+      )
+      .catch((err: Error) => console.warn('[GoggleBLE] sendCommand error:', err));
+  }
+
+  // ---------- Both sides ----------
+
+  /** Subscribe to incoming command notifications (Goggle Mode receives these) */
+  onCommand(listener: CommandListener): () => void {
+    this.commandListeners.add(listener);
+    return () => this.commandListeners.delete(listener);
+  }
+
+  /** Subscribe to incoming telemetry notifications (Main Mode receives these) */
+  onTelemetry(listener: TelemetryListener): () => void {
+    this.telemetryListeners.add(listener);
+    return () => this.telemetryListeners.delete(listener);
+  }
+
+  /** Disconnect + graceful cleanup */
+  async disconnect(): Promise<void> {
+    this.disableAutoReconnect();
+    this.goggleTxSubscription?.remove();
+    this.goggleTxSubscription = null;
+    if (this.manager && this.connectedGoggleBle) {
+      try {
+        await this.manager.cancelDeviceConnection(this.connectedGoggleBle.id);
+      } catch (err) {
+        console.warn('[GoggleBLE] disconnect error:', err);
+      }
+    }
+    this.connectedGoggle = null;
+    this.connectedGoggleBle = null;
+    this.stopPeripheral();
+  }
+
+  // ---------- Auto-reconnect ----------
+
+  enableAutoReconnect(gogglesId: string): void {
+    this.autoReconnectEnabled = true;
+    this.reconnectGogglesId = gogglesId;
+    this.reconnectAttempts = 0;
+  }
+
+  disableAutoReconnect(): void {
+    this.autoReconnectEnabled = false;
+    this.reconnectGogglesId = null;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  /** Call this when a BLE disconnect is detected while auto-reconnect is enabled */
+  handleGoggleDisconnect(_gogglesId?: string): void {
+    if (!this.autoReconnectEnabled || !this.reconnectGogglesId) return;
+    if (this.reconnectAttempts >= GOGGLE_MAX_RECONNECT_ATTEMPTS) {
+      console.warn('[GoggleBLE] Max reconnect attempts reached — giving up');
+      this.commandListeners.forEach((l) => l({ evt: 'ble_reconnect_failed' }));
+      this.disableAutoReconnect();
+      return;
+    }
+    const delay = Math.min(
+      GOGGLE_RECONNECT_BASE_DELAY * Math.pow(2, this.reconnectAttempts),
+      GOGGLE_RECONNECT_MAX_DELAY
+    );
+    this.reconnectAttempts += 1;
+    console.log(`[GoggleBLE] BLE reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
+    this.reconnectTimer = setTimeout(async () => {
+      try {
+        const device = await this.scanForGoggle(8000);
+        if (device) {
+          await this.connectToGoggle(device);
+          console.log('[GoggleBLE] Reconnected to goggle after BLE drop');
+          this.reconnectAttempts = 0;
+        } else {
+          this.handleGoggleDisconnect(); // retry
+        }
+      } catch (err) {
+        console.warn('[GoggleBLE] Reconnect attempt failed:', err);
+        this.handleGoggleDisconnect(); // retry
+      }
+    }, delay);
+  }
+
+  getConnectedGoggle(): WooverseDevice | null {
+    return this.connectedGoggle;
+  }
+}
+
+export const goggleBridge = new WooverseGoggleBridge();
 
 export { WOOVERSE_SERVICE_UUID, bleSimulator };
 export default bleBridge;
