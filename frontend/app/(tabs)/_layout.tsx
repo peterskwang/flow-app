@@ -66,10 +66,10 @@ const TabsLayout = () => {
         }}
       />
       <Tabs.Screen
-        name="ipod"
+        name="runs"
         options={{
-          title: 'iPod',
-          tabBarIcon: ({ color, size }) => <Ionicons name="headset-outline" color={color} size={size} />
+          title: 'Runs',
+          tabBarIcon: ({ color, size }) => <Ionicons name="speedometer-outline" color={color} size={size} />
         }}
       />
       <Tabs.Screen

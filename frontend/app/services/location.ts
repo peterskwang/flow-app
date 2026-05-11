@@ -5,6 +5,8 @@ import wsClient from './ws';
 export interface Coordinates {
   latitude: number;
   longitude: number;
+  altitude: number | null;   // metres ASL, null if unavailable
+  speed: number | null;     // m/s from GPS, null if unavailable
 }
 
 let locationSubscription: Location.LocationSubscription | null = null;
@@ -33,7 +35,9 @@ export const startLocationTracking = async (onUpdate?: (coords: Coordinates) => 
     (location) => {
       const coords: Coordinates = {
         latitude: location.coords.latitude,
-        longitude: location.coords.longitude
+        longitude: location.coords.longitude,
+        altitude: location.coords.altitude ?? null,
+        speed: location.coords.speed ?? null,
       };
 
       onUpdate?.(coords);
@@ -43,7 +47,9 @@ export const startLocationTracking = async (onUpdate?: (coords: Coordinates) => 
           type: 'location',
           lat: coords.latitude,
           lng: coords.longitude,
-          ts: Date.now()
+          altitude_m: coords.altitude,
+          speed_ms: coords.speed,
+          ts: Date.now(),
         });
       }
     }
