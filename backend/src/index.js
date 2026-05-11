@@ -10,6 +10,7 @@ const locationRoutes = require('./routes/locations');
 const sosRoutes = require('./routes/sos');
 const adminRoutes = require('./routes/admin');
 const runRoutes = require('./routes/runs');
+const statsRoutes = require('./routes/stats');
 
 const app = express();
 const server = http.createServer(app);
@@ -30,6 +31,7 @@ app.use('/api/locations', locationRoutes);
 app.use('/api/sos', sosRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/runs', runRoutes);
+app.use('/api/stats', statsRoutes);
 
 // WebSocket for real-time: GPS pings + intercom signaling
 setupWebSocket(server);

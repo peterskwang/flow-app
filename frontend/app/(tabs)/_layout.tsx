@@ -73,6 +73,13 @@ const TabsLayout = () => {
         }}
       />
       <Tabs.Screen
+        name="stats"
+        options={{
+          title: 'Stats',
+          tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart-outline" color={color} size={size} />
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',
