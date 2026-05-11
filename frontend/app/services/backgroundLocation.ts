@@ -15,13 +15,15 @@ TaskManager.defineTask(FLOW_LOCATION_TASK, async ({ data, error }) => {
   if (!locations || locations.length === 0) return;
 
   const latest = locations[locations.length - 1];
-  const { latitude, longitude } = latest.coords;
+  const { latitude, longitude, altitude, speed } = latest.coords;
 
   if (wsClient.isConnected()) {
     wsClient.send({
       type: 'location',
       lat: latitude,
       lng: longitude,
+      altitude_m: altitude ?? null,
+      speed_ms: speed ?? null,
       ts: Date.now(),
     });
   }

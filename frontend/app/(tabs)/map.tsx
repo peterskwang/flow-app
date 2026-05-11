@@ -9,6 +9,7 @@ import {
   startLocationTracking,
   stopLocationTracking
 } from '../services/location';
+import runEngine, { RunSnapshot } from '../services/runEngine';
 import wsClient from '../services/ws';
 
 interface Teammate {
@@ -110,9 +111,28 @@ const MAP_HTML = `
 </html>
 `;
 
+const formatDuration = (s: number): string => {
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+};
+
+interface SummaryRowProps {
+  label: string;
+  value: string;
+}
+
+const SummaryRow = ({ label, value }: SummaryRowProps) => (
+  <View style={styles.summaryRow}>
+    <Text style={styles.summaryLabel}>{label}</Text>
+    <Text style={styles.summaryValue}>{value}</Text>
+  </View>
+);
+
 const MapScreen = () => {
   const [coords, setCoords] = useState<Coordinates | null>(null);
   const [groupId, setGroupId] = useState<string | null>(null);
+  const [runSnap, setRunSnap] = useState<RunSnapshot | null>(null);
   const [teammates, setTeammates] = useState<Teammate[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -184,9 +204,18 @@ const MapScreen = () => {
   }, []);
 
   useEffect(() => {
+    runEngine.onUpdate(setRunSnap);
+  }, []);
+
+  useEffect(() => {
     let mounted = true;
     startLocationTracking((latest) => {
-      if (mounted) setCoords(latest);
+      if (mounted) {
+        setCoords(latest);
+        runEngine.feed(latest, groupId).catch((err) =>
+          console.warn('[Map] runEngine.feed error:', err)
+        );
+      }
     }).catch((error) => {
       setLocationError(error.message || 'Location unavailable');
     });
@@ -194,7 +223,8 @@ const MapScreen = () => {
       mounted = false;
       stopLocationTracking();
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId]);
 
   useEffect(() => {
     const handler = (message: any) => {
@@ -325,6 +355,26 @@ const MapScreen = () => {
         />
       </View>
 
+      {/* Run HUD overlay — shown during ACTIVE run */}
+      {runSnap?.state === 'ACTIVE' && (
+        <View style={styles.runHUD}>
+          <View style={styles.hudRow}>
+            <Text style={styles.hudLabel}>SPEED</Text>
+            <Text style={styles.hudValue}>{runSnap.maxSpeedKmh.toFixed(0)}</Text>
+            <Text style={styles.hudUnit}>km/h</Text>
+          </View>
+          <View style={styles.hudRow}>
+            <Text style={styles.hudLabel}>↓ DROP</Text>
+            <Text style={styles.hudValue}>{runSnap.verticalMeters.toFixed(0)}</Text>
+            <Text style={styles.hudUnit}>m</Text>
+          </View>
+          <View style={styles.hudRow}>
+            <Text style={styles.hudLabel}>TIME</Text>
+            <Text style={styles.hudValue}>{formatDuration(runSnap.durationSeconds)}</Text>
+          </View>
+        </View>
+      )}
+
       <View style={styles.sosWrapper}>
         <Pressable
           onLongPress={handleSosLongPress}
@@ -341,6 +391,35 @@ const MapScreen = () => {
         {sosSent ? <Text style={styles.sosStatusText}>SOS SENT</Text> : null}
       </View>
     </View>
+
+      {/* Post-run summary modal */}
+      <Modal
+        animationType="slide"
+        transparent
+        visible={runSnap?.state === 'ENDED'}
+        onRequestClose={() => {}}
+      >
+        <View style={styles.summaryBackdrop}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>🎿 Run Complete!</Text>
+            {runSnap && (
+              <>
+                <SummaryRow label="Duration" value={formatDuration(runSnap.durationSeconds)} />
+                <SummaryRow label="Vertical" value={`${runSnap.verticalMeters.toFixed(0)} m`} />
+                <SummaryRow
+                  label="Distance"
+                  value={`${(runSnap.distanceMeters / 1000).toFixed(2)} km`}
+                />
+                <SummaryRow label="Top Speed" value={`${runSnap.maxSpeedKmh.toFixed(1)} km/h`} />
+                <SummaryRow label="Avg Speed" value={`${runSnap.avgSpeedKmh.toFixed(1)} km/h`} />
+              </>
+            )}
+            <Pressable style={styles.summaryDoneBtn} onPress={() => { /* runEngine auto-resets after 2 s */ }}>
+              <Text style={styles.summaryDoneBtnText}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         animationType="fade"
@@ -407,7 +486,31 @@ const styles = StyleSheet.create({
   modalSubtitle: { color: '#ffb74d', textAlign: 'center' },
   modalCoords: { color: '#64ffda', fontSize: 16, fontWeight: '600' },
   modalButton: { marginTop: 8, backgroundColor: '#1e88e5', paddingHorizontal: 28, paddingVertical: 12, borderRadius: 30 },
-  modalButtonText: { color: '#fff', fontWeight: '700' }
+  modalButtonText: { color: '#fff', fontWeight: '700' },
+  // Run HUD
+  runHUD: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: 'rgba(6,18,31,0.85)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    zIndex: 10,
+  },
+  hudRow: { flexDirection: 'row', alignItems: 'baseline', marginBottom: 4 },
+  hudLabel: { color: '#64ffda', fontSize: 10, fontWeight: '700', width: 46 },
+  hudValue: { color: '#64ffda', fontSize: 18, fontWeight: '800', marginHorizontal: 4 },
+  hudUnit: { color: '#64ffda', fontSize: 11 },
+  // Post-run summary
+  summaryBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center' },
+  summaryCard: { width: '80%', backgroundColor: '#0f2238', borderRadius: 20, padding: 24, alignItems: 'stretch', gap: 10 },
+  summaryTitle: { fontSize: 22, fontWeight: '800', color: '#fff', textAlign: 'center', marginBottom: 8 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#1e3a5f' },
+  summaryLabel: { color: '#9fb4cc', fontSize: 14 },
+  summaryValue: { color: '#64ffda', fontSize: 14, fontWeight: '700' },
+  summaryDoneBtn: { marginTop: 12, backgroundColor: '#1e88e5', paddingVertical: 12, borderRadius: 30, alignItems: 'center' },
+  summaryDoneBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });
 
 export default MapScreen;
